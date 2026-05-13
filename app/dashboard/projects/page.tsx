@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Plus, Pencil, Trash2, X, FolderOpen, Search, ChevronDown } from 'lucide-react';
+import { Plus, Pencil, Trash2, X, FolderOpen, Search, ChevronDown, Building2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import type { Project, Product } from '@/types';
@@ -17,7 +17,6 @@ const empty = {
 };
 
 // ─── Portal Dropdown ────────────────────────────────────────────────────────
-// Renders at document.body level so modal overflow:hidden never clips it
 function PortalDropdown({
   anchorRef,
   open,
@@ -53,7 +52,7 @@ function PortalDropdown({
         borderRadius: '8px',
         zIndex: 9999,
         boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
-        maxHeight: '220px',
+        maxHeight: '260px',
         overflowY: 'auto',
       }}
     >
@@ -72,46 +71,86 @@ function AutocompleteInput({
   placeholder,
   onChange,
   onClear,
+  showSelectedBadge = false,
 }: {
   items: AutoItem[];
   value: { id: string; name: string };
   placeholder: string;
   onChange: (item: AutoItem) => void;
   onClear: () => void;
+  showSelectedBadge?: boolean;
 }) {
   const [query, setQuery] = useState(value.name);
   const [open, setOpen] = useState(false);
+  const [highlighted, setHighlighted] = useState(-1);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => { setQuery(value.name); }, [value.name]);
 
+  // Reset highlight when filtered list changes
   const filtered = items.filter(i =>
     i.label.toLowerCase().includes(query.toLowerCase())
   ).slice(0, 8);
+
+  useEffect(() => { setHighlighted(-1); }, [query]);
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (!listRef.current || highlighted < 0) return;
+    const el = listRef.current.querySelectorAll<HTMLDivElement>('[data-item]')[highlighted];
+    el?.scrollIntoView({ block: 'nearest' });
+  }, [highlighted]);
 
   function select(item: AutoItem) {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     onChange(item);
     setQuery(item.label);
     setOpen(false);
+    setHighlighted(-1);
   }
 
   function clear() {
     onClear();
     setQuery('');
     setOpen(false);
+    setHighlighted(-1);
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (!open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+      setOpen(true);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlighted(h => Math.min(h + 1, filtered.length - 1));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlighted(h => Math.max(h - 1, 0));
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (highlighted >= 0 && filtered[highlighted]) {
+        select(filtered[highlighted]);
+      }
+    } else if (e.key === 'Escape') {
+      setOpen(false);
+      setHighlighted(-1);
+    }
   }
 
   function handleBlur() {
-    // Delay close so onMouseDown on a dropdown item fires first
-    closeTimer.current = setTimeout(() => setOpen(false), 200);
+    closeTimer.current = setTimeout(() => { setOpen(false); setHighlighted(-1); }, 200);
   }
 
   function handleFocus() {
     if (closeTimer.current) clearTimeout(closeTimer.current);
     setOpen(true);
   }
+
+  // The selected item (for badge)
+  const selectedItem = value.id ? items.find(i => i.id === value.id) : null;
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
@@ -124,6 +163,8 @@ function AutocompleteInput({
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
           onFocus={handleFocus}
           onBlur={handleBlur}
+          onKeyDown={handleKeyDown}
+          autoComplete="off"
           style={{ paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
         />
         {value.id ? (
@@ -135,29 +176,58 @@ function AutocompleteInput({
         )}
       </div>
 
+      {/* Company badge shown below input after selection */}
+      {showSelectedBadge && selectedItem?.sub && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginTop: '0.4rem' }}>
+          <Building2 size={11} style={{ color: 'var(--text-muted)' }} />
+          <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{selectedItem.sub}</span>
+        </div>
+      )}
+
       <PortalDropdown anchorRef={wrapRef} open={open && filtered.length > 0}>
-        {filtered.map(item => (
-          <div
-            key={item.id}
-            onMouseDown={() => select(item)}
-            style={{
-              padding: '0.65rem 1rem',
-              cursor: 'pointer',
-              fontSize: '0.875rem',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              background: value.id === item.id ? 'rgba(108,99,255,0.12)' : 'transparent',
-              color: value.id === item.id ? 'var(--accent)' : 'var(--text)',
-              borderLeft: value.id === item.id ? '2px solid var(--accent)' : '2px solid transparent',
-            }}
-            onMouseEnter={e => { if (value.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
-            onMouseLeave={e => { if (value.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-          >
-            <span style={{ fontWeight: value.id === item.id ? 600 : 400 }}>{item.label}</span>
-            {item.sub && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.sub}</span>}
-          </div>
-        ))}
+        <div ref={listRef}>
+          {filtered.map((item, idx) => {
+            const isHighlighted = idx === highlighted;
+            const isSelected = value.id === item.id;
+            return (
+              <div
+                key={item.id}
+                data-item
+                onMouseDown={() => select(item)}
+                onMouseEnter={() => setHighlighted(idx)}
+                style={{
+                  padding: '0.6rem 1rem',
+                  cursor: 'pointer',
+                  fontSize: '0.875rem',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  background: isHighlighted
+                    ? 'rgba(108,99,255,0.18)'
+                    : isSelected
+                    ? 'rgba(108,99,255,0.10)'
+                    : 'transparent',
+                  color: isHighlighted || isSelected ? 'var(--accent)' : 'var(--text)',
+                  borderLeft: isHighlighted || isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+                  transition: 'background 0.08s',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                  <span style={{ fontWeight: isSelected ? 600 : 400 }}>{item.label}</span>
+                  {item.sub && (
+                    <span style={{ fontSize: '0.7rem', color: isHighlighted || isSelected ? 'rgba(108,99,255,0.7)' : 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                      <Building2 size={10} />
+                      {item.sub}
+                    </span>
+                  )}
+                </div>
+                {isHighlighted && (
+                  <span style={{ fontSize: '0.65rem', color: 'rgba(108,99,255,0.6)', marginLeft: '0.5rem', whiteSpace: 'nowrap' }}>↵ select</span>
+                )}
+              </div>
+            );
+          })}
+        </div>
       </PortalDropdown>
     </div>
   );
@@ -178,6 +248,7 @@ function ContactAutocomplete({ contacts, value, onChange }: {
       placeholder="Search contacts..."
       onChange={item => onChange(item.id, item.label)}
       onClear={() => onChange('', '')}
+      showSelectedBadge
     />
   );
 }
