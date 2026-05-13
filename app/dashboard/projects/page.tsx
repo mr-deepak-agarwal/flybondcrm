@@ -9,6 +9,7 @@ import type { Project, Product } from '@/types';
 
 const empty = {
   client_name: '',
+  contact_id: '',
   address: '',
   work_description: '',
   product_id: '',
@@ -302,8 +303,8 @@ export default function ProjectsPage() {
   function openAdd() { setEditing(null); setForm(empty); setSelectedContactId(''); setShowModal(true); }
   function openEdit(p: Project) {
     setEditing(p);
-    setForm({ client_name: p.client_name, address: p.address || '', work_description: p.work_description || '', product_id: p.product_id || '', product_name: p.product_name || '', status: p.status as 'active' });
-    setSelectedContactId('');
+    setForm({ client_name: p.client_name, contact_id: p.contact_id || '', address: p.address || '', work_description: p.work_description || '', product_id: p.product_id || '', product_name: p.product_name || '', status: p.status as 'active' });
+    setSelectedContactId(p.contact_id || '');
     setShowModal(true);
   }
   function close() { setShowModal(false); }
@@ -402,7 +403,7 @@ export default function ProjectsPage() {
                 <ContactAutocomplete
                   contacts={contacts}
                   value={{ id: selectedContactId, name: form.client_name }}
-                  onChange={(id, name) => { setSelectedContactId(id); setForm(f => ({ ...f, client_name: name })); }}
+                  onChange={(id, name) => { setSelectedContactId(id); setForm(f => ({ ...f, client_name: name, contact_id: id })); }}
                 />
               </div>
               <div>
