@@ -1,12 +1,112 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
-import { Plus, Pencil, Trash2, X, FolderOpen } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, Pencil, Trash2, X, FolderOpen, Search, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import type { Project, Product } from '@/types';
 
 const empty = { client_name: '', address: '', work_description: '', product_id: '', product_name: '', status: 'active' as const };
+
+function ProductAutocomplete({ products, value, onChange }: {
+  products: Product[];
+  value: { id: string; name: string };
+  onChange: (id: string, name: string) => void;
+}) {
+  const [query, setQuery] = useState(value.name);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  // sync when form resets
+  useEffect(() => { setQuery(value.name); }, [value.name]);
+
+  // close on outside click
+  useEffect(() => {
+    function handler(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filtered = products.filter(p =>
+    p.name.toLowerCase().includes(query.toLowerCase())
+  ).slice(0, 8);
+
+  function select(p: Product) {
+    onChange(p.id, p.name);
+    setQuery(p.name);
+    setOpen(false);
+  }
+
+  function clear() {
+    onChange('', '');
+    setQuery('');
+    setOpen(false);
+  }
+
+  return (
+    <div ref={ref} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        <input
+          className="input"
+          placeholder="Search product..."
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          style={{ paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
+        />
+        {value.id ? (
+          <button type="button" onClick={clear} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}>
+            <X size={14} />
+          </button>
+        ) : (
+          <ChevronDown size={14} style={{ position: 'absolute', right: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
+        )}
+      </div>
+
+      {open && (
+        <div style={{
+          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
+          background: 'var(--surface-2)', border: '1px solid var(--border)',
+          borderRadius: '8px', zIndex: 100, overflow: 'hidden',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
+          maxHeight: '220px', overflowY: 'auto',
+        }}>
+          {filtered.length === 0 ? (
+            <div style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
+              No products found
+            </div>
+          ) : filtered.map(p => (
+            <div
+              key={p.id}
+              onMouseDown={() => select(p)}
+              style={{
+                padding: '0.65rem 1rem',
+                cursor: 'pointer',
+                fontSize: '0.875rem',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                background: value.id === p.id ? 'rgba(108,99,255,0.12)' : 'transparent',
+                color: value.id === p.id ? 'var(--accent)' : 'var(--text)',
+                borderLeft: value.id === p.id ? '2px solid var(--accent)' : '2px solid transparent',
+              }}
+              onMouseEnter={e => { if (value.id !== p.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
+              onMouseLeave={e => { if (value.id !== p.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+            >
+              <span style={{ fontWeight: value.id === p.id ? 600 : 400 }}>{p.name}</span>
+              {p.price != null && (
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>₹{p.price.toLocaleString('en-IN')}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -40,9 +140,8 @@ export default function ProjectsPage() {
   }
   function close() { setShowModal(false); }
 
-  function handleProductChange(id: string) {
-    const prod = products.find(p => p.id === id);
-    setForm(f => ({ ...f, product_id: id, product_name: prod?.name || '' }));
+  function handleProductChange(id: string, name: string) {
+    setForm(f => ({ ...f, product_id: id, product_name: name }));
   }
 
   async function save(e: React.FormEvent) {
@@ -152,10 +251,11 @@ export default function ProjectsPage() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                 <div>
                   <label>Product</label>
-                  <select className="input" value={form.product_id} onChange={e => handleProductChange(e.target.value)}>
-                    <option value="">Select product...</option>
-                    {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
+                  <ProductAutocomplete
+                    products={products}
+                    value={{ id: form.product_id, name: form.product_name }}
+                    onChange={handleProductChange}
+                  />
                 </div>
                 <div>
                   <label>Status</label>
