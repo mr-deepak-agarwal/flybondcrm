@@ -28,6 +28,7 @@ export interface Project {
   product_name?: string;
   status: 'active' | 'completed' | 'on-hold';
   created_at: string;
+  contact_id?: string; 
   updated_at: string;
   product?: Product;
 }
