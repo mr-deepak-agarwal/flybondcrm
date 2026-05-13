@@ -1,60 +1,129 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { Plus, Pencil, Trash2, X, FolderOpen, Search, ChevronDown } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import Toast from '@/components/Toast';
 import type { Project, Product } from '@/types';
 
-const empty = { client_name: '', address: '', work_description: '', product_id: '', product_name: '', status: 'active' as const };
+const empty = {
+  client_name: '',
+  address: '',
+  work_description: '',
+  product_id: '',
+  product_name: '',
+  status: 'active' as const,
+};
 
-function ProductAutocomplete({ products, value, onChange }: {
-  products: Product[];
+// ─── Portal Dropdown ────────────────────────────────────────────────────────
+// Renders at document.body level so modal overflow:hidden never clips it
+function PortalDropdown({
+  anchorRef,
+  open,
+  children,
+}: {
+  anchorRef: React.RefObject<HTMLDivElement | null>;
+  open: boolean;
+  children: React.ReactNode;
+}) {
+  const [coords, setCoords] = useState({ top: 0, left: 0, width: 0 });
+
+  useEffect(() => {
+    if (!open || !anchorRef.current) return;
+    const rect = anchorRef.current.getBoundingClientRect();
+    setCoords({
+      top: rect.bottom + window.scrollY + 4,
+      left: rect.left + window.scrollX,
+      width: rect.width,
+    });
+  }, [open, anchorRef]);
+
+  if (!open) return null;
+
+  return createPortal(
+    <div
+      style={{
+        position: 'absolute',
+        top: coords.top,
+        left: coords.left,
+        width: coords.width,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--border)',
+        borderRadius: '8px',
+        zIndex: 9999,
+        boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+        maxHeight: '220px',
+        overflowY: 'auto',
+      }}
+    >
+      {children}
+    </div>,
+    document.body
+  );
+}
+
+// ─── Generic Autocomplete ───────────────────────────────────────────────────
+interface AutoItem { id: string; label: string; sub?: string; }
+
+function AutocompleteInput({
+  items,
+  value,
+  placeholder,
+  onChange,
+  onClear,
+}: {
+  items: AutoItem[];
   value: { id: string; name: string };
-  onChange: (id: string, name: string) => void;
+  placeholder: string;
+  onChange: (item: AutoItem) => void;
+  onClear: () => void;
 }) {
   const [query, setQuery] = useState(value.name);
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // sync when form resets
   useEffect(() => { setQuery(value.name); }, [value.name]);
 
-  // close on outside click
-  useEffect(() => {
-    function handler(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
-  }, []);
-
-  const filtered = products.filter(p =>
-    p.name.toLowerCase().includes(query.toLowerCase())
+  const filtered = items.filter(i =>
+    i.label.toLowerCase().includes(query.toLowerCase())
   ).slice(0, 8);
 
-  function select(p: Product) {
-    onChange(p.id, p.name);
-    setQuery(p.name);
+  function select(item: AutoItem) {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    onChange(item);
+    setQuery(item.label);
     setOpen(false);
   }
 
   function clear() {
-    onChange('', '');
+    onClear();
     setQuery('');
     setOpen(false);
   }
 
+  function handleBlur() {
+    // Delay close so onMouseDown on a dropdown item fires first
+    closeTimer.current = setTimeout(() => setOpen(false), 200);
+  }
+
+  function handleFocus() {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+    setOpen(true);
+  }
+
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={wrapRef} style={{ position: 'relative' }}>
       <div style={{ position: 'relative' }}>
         <Search size={14} style={{ position: 'absolute', left: '0.75rem', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none' }} />
         <input
           className="input"
-          placeholder="Search product..."
+          placeholder={placeholder}
           value={query}
           onChange={e => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
           style={{ paddingLeft: '2.25rem', paddingRight: '2.25rem' }}
         />
         {value.id ? (
@@ -66,104 +135,129 @@ function ProductAutocomplete({ products, value, onChange }: {
         )}
       </div>
 
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0, right: 0,
-          background: 'var(--surface-2)', border: '1px solid var(--border)',
-          borderRadius: '8px', zIndex: 100, overflow: 'hidden',
-          boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-          maxHeight: '220px', overflowY: 'auto',
-        }}>
-          {filtered.length === 0 ? (
-            <div style={{ padding: '0.75rem 1rem', color: 'var(--text-muted)', fontSize: '0.875rem' }}>
-              No products found
-            </div>
-          ) : filtered.map(p => (
-            <div
-              key={p.id}
-              onMouseDown={() => select(p)}
-              style={{
-                padding: '0.65rem 1rem',
-                cursor: 'pointer',
-                fontSize: '0.875rem',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                background: value.id === p.id ? 'rgba(108,99,255,0.12)' : 'transparent',
-                color: value.id === p.id ? 'var(--accent)' : 'var(--text)',
-                borderLeft: value.id === p.id ? '2px solid var(--accent)' : '2px solid transparent',
-              }}
-              onMouseEnter={e => { if (value.id !== p.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
-              onMouseLeave={e => { if (value.id !== p.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
-            >
-              <span style={{ fontWeight: value.id === p.id ? 600 : 400 }}>{p.name}</span>
-              {p.price != null && (
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>₹{p.price.toLocaleString('en-IN')}</span>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
+      <PortalDropdown anchorRef={wrapRef} open={open && filtered.length > 0}>
+        {filtered.map(item => (
+          <div
+            key={item.id}
+            onMouseDown={() => select(item)}
+            style={{
+              padding: '0.65rem 1rem',
+              cursor: 'pointer',
+              fontSize: '0.875rem',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              background: value.id === item.id ? 'rgba(108,99,255,0.12)' : 'transparent',
+              color: value.id === item.id ? 'var(--accent)' : 'var(--text)',
+              borderLeft: value.id === item.id ? '2px solid var(--accent)' : '2px solid transparent',
+            }}
+            onMouseEnter={e => { if (value.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.04)'; }}
+            onMouseLeave={e => { if (value.id !== item.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent'; }}
+          >
+            <span style={{ fontWeight: value.id === item.id ? 600 : 400 }}>{item.label}</span>
+            {item.sub && <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{item.sub}</span>}
+          </div>
+        ))}
+      </PortalDropdown>
     </div>
   );
 }
 
+// ─── Contact Autocomplete ───────────────────────────────────────────────────
+interface Contact { id: string; name: string; company?: string; }
+
+function ContactAutocomplete({ contacts, value, onChange }: {
+  contacts: Contact[];
+  value: { id: string; name: string };
+  onChange: (id: string, name: string) => void;
+}) {
+  return (
+    <AutocompleteInput
+      items={contacts.map(c => ({ id: c.id, label: c.name, sub: c.company }))}
+      value={value}
+      placeholder="Search contacts..."
+      onChange={item => onChange(item.id, item.label)}
+      onClear={() => onChange('', '')}
+    />
+  );
+}
+
+// ─── Product Autocomplete ───────────────────────────────────────────────────
+function ProductAutocomplete({ products, value, onChange }: {
+  products: Product[];
+  value: { id: string; name: string };
+  onChange: (id: string, name: string) => void;
+}) {
+  return (
+    <AutocompleteInput
+      items={products.map(p => ({ id: p.id, label: p.name, sub: p.price != null ? `₹${p.price.toLocaleString('en-IN')}` : undefined }))}
+      value={value}
+      placeholder="Search product..."
+      onChange={item => onChange(item.id, item.label)}
+      onClear={() => onChange('', '')}
+    />
+  );
+}
+
+// ─── Main Page ──────────────────────────────────────────────────────────────
 export default function ProjectsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState<Project | null>(null);
   const [form, setForm] = useState(empty);
+  const [selectedContactId, setSelectedContactId] = useState('');
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const supabase = createClient();
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [{ data: proj }, { data: prod }] = await Promise.all([
+    const [{ data: proj }, { data: prod }, { data: cont }] = await Promise.all([
       supabase.from('projects').select('*').order('created_at', { ascending: false }),
       supabase.from('products').select('*').order('name'),
+      supabase.from('contacts').select('id, name, company').order('name'),
     ]);
     setProjects(proj || []);
     setProducts(prod || []);
+    setContacts(cont || []);
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  function openAdd() { setEditing(null); setForm(empty); setShowModal(true); }
+  function openAdd() { setEditing(null); setForm(empty); setSelectedContactId(''); setShowModal(true); }
   function openEdit(p: Project) {
     setEditing(p);
     setForm({ client_name: p.client_name, address: p.address || '', work_description: p.work_description || '', product_id: p.product_id || '', product_name: p.product_name || '', status: p.status as 'active' });
+    setSelectedContactId('');
     setShowModal(true);
   }
   function close() { setShowModal(false); }
-
-  function handleProductChange(id: string, name: string) {
-    setForm(f => ({ ...f, product_id: id, product_name: name }));
-  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
     setSaving(true);
     const payload = { ...form, updated_at: new Date().toISOString() };
-
     if (editing) {
       const { error } = await supabase.from('projects').update(payload).eq('id', editing.id);
-      if (error) { setToast({ msg: error.message, type: 'error' }); } else { setToast({ msg: 'Project updated', type: 'success' }); }
+      if (error) setToast({ msg: error.message, type: 'error' });
+      else setToast({ msg: 'Project updated', type: 'success' });
     } else {
       const { error } = await supabase.from('projects').insert(payload);
-      if (error) { setToast({ msg: error.message, type: 'error' }); } else { setToast({ msg: 'Project added', type: 'success' }); }
+      if (error) setToast({ msg: error.message, type: 'error' });
+      else setToast({ msg: 'Project added', type: 'success' });
     }
-
     setSaving(false); close(); load();
   }
 
   async function del(id: string) {
     if (!confirm('Delete this project?')) return;
     const { error } = await supabase.from('projects').delete().eq('id', id);
-    if (error) { setToast({ msg: error.message, type: 'error' }); } else { setToast({ msg: 'Project deleted', type: 'success' }); load(); }
+    if (error) setToast({ msg: error.message, type: 'error' });
+    else { setToast({ msg: 'Project deleted', type: 'success' }); load(); }
   }
 
   return (
@@ -198,17 +292,13 @@ export default function ProjectsPage() {
               ) : projects.map(p => (
                 <tr key={p.id}>
                   <td>
-                    <div>
-                      <div style={{ fontWeight: 600 }}>{p.client_name}</div>
-                      {p.work_description && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.work_description}</div>}
-                    </div>
+                    <div style={{ fontWeight: 600 }}>{p.client_name}</div>
+                    {p.work_description && <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.2rem', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.work_description}</div>}
                   </td>
                   <td style={{ color: 'var(--text-muted)', maxWidth: '160px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.address || '—'}</td>
                   <td>
                     {p.product_name ? (
-                      <span style={{ background: 'rgba(108,99,255,0.1)', color: 'var(--accent)', padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>
-                        {p.product_name}
-                      </span>
+                      <span style={{ background: 'rgba(108,99,255,0.1)', color: 'var(--accent)', padding: '0.2rem 0.65rem', borderRadius: '6px', fontSize: '0.8rem', fontWeight: 600 }}>{p.product_name}</span>
                     ) : '—'}
                   </td>
                   <td><span className={`badge badge-${p.status}`}>{p.status}</span></td>
@@ -238,7 +328,11 @@ export default function ProjectsPage() {
             <form onSubmit={save} style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
               <div>
                 <label>Client Name *</label>
-                <input className="input" required placeholder="Acme Corporation" value={form.client_name} onChange={e => setForm(f => ({ ...f, client_name: e.target.value }))} />
+                <ContactAutocomplete
+                  contacts={contacts}
+                  value={{ id: selectedContactId, name: form.client_name }}
+                  onChange={(id, name) => { setSelectedContactId(id); setForm(f => ({ ...f, client_name: name })); }}
+                />
               </div>
               <div>
                 <label>Address</label>
@@ -254,7 +348,7 @@ export default function ProjectsPage() {
                   <ProductAutocomplete
                     products={products}
                     value={{ id: form.product_id, name: form.product_name }}
-                    onChange={handleProductChange}
+                    onChange={(id, name) => setForm(f => ({ ...f, product_id: id, product_name: name }))}
                   />
                 </div>
                 <div>
