@@ -1,15 +1,21 @@
-import type { Metadata } from 'next';
-import './globals.css';
+import { redirect } from 'next/navigation';
+import { createServerSupabaseClient } from '@/lib/supabase-server';
+import Sidebar from '@/components/Sidebar';
 
-export const metadata: Metadata = {
-  title: 'CRM Dashboard',
-  description: 'Client Relationship Management',
-};
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const supabase = await createServerSupabaseClient();
+  const { data: { user } } = await supabase.auth.getUser();
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+  if (!user) {
+    redirect('/login');
+  }
+
   return (
-    <html lang="en">
-      <body>{children}</body>
-    </html>
+    <div style={{ display: 'flex', minHeight: '100vh' }}>
+      <Sidebar />
+      <main style={{ flex: 1, overflow: 'auto' }}>
+        {children}
+      </main>
+    </div>
   );
 }
