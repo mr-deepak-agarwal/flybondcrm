@@ -73,7 +73,7 @@ export interface Contact {
 }
 
 // Derived helper
-export function contactDisplayName(c: Contact): string {
+export function contactDisplayName(c: Pick<Contact, 'title' | 'first_name' | 'middle_name' | 'last_name'>): string {
   return [c.title, c.first_name, c.middle_name, c.last_name]
     .filter(Boolean)
     .join(' ');

@@ -7,6 +7,9 @@ import Toast from '@/components/Toast';
 import type { Project, Contact, Product } from '@/types';
 import { PIPELINE_STAGES, contactDisplayName } from '@/types';
 
+type ContactDropdown = Pick<Contact, 'id' | 'first_name' | 'middle_name' | 'last_name' | 'company' | 'title'>;
+
+
 const emptyForm = {
   client_name: '', contact_id: '', address: '', work_description: '',
   product_id: '', product_name: '', status: 'active' as const, bill_no: '', amount: '',
@@ -14,7 +17,7 @@ const emptyForm = {
 
 export default function ProjectsPage() {
   const [projects, setProjects]   = useState<Project[]>([]);
-  const [contacts, setContacts]   = useState<Contact[]>([]);
+  const [contacts, setContacts]   = useState<ContactDropdown[]>([]);
   const [products, setProducts]   = useState<Product[]>([]);
   const [loading, setLoading]     = useState(true);
   const [search, setSearch]       = useState('');
@@ -29,7 +32,7 @@ export default function ProjectsPage() {
     setLoading(true);
     const [{ data: proj }, { data: cont }, { data: prod }] = await Promise.all([
       supabase.from('projects').select('*').order('created_at', { ascending: false }),
-      supabase.from('contacts').select('id,first_name,last_name,company,title').order('first_name'),
+      supabase.from('contacts').select('id,first_name,middle_name,last_name,company,title').order('first_name'),
       supabase.from('products').select('*').order('name'),
     ]);
     setProjects(proj || []);
