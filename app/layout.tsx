@@ -1,21 +1,15 @@
-import { redirect } from 'next/navigation';
-import { createServerSupabaseClient } from '@/lib/supabase-server';
-import Sidebar from '@/components/Sidebar';
+import type { Metadata } from 'next';
+import './globals.css';
 
-export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const supabase = await createServerSupabaseClient();
-  const { data: { user } } = await supabase.auth.getUser();
+export const metadata: Metadata = {
+  title: 'FlyBond CRM',
+  description: 'CRM for FlyBond',
+};
 
-  if (!user) {
-    redirect('/login');
-  }
-
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
-      <Sidebar />
-      <main style={{ flex: 1, overflow: 'auto' }}>
-        {children}
-      </main>
-    </div>
+    <html lang="en">
+      <body>{children}</body>
+    </html>
   );
 }
