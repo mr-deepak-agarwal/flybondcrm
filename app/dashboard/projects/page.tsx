@@ -12,7 +12,7 @@ type ContactDropdown = Pick<Contact, 'id' | 'first_name' | 'middle_name' | 'last
 
 const emptyForm = {
   client_name: '', contact_id: '', address: '', work_description: '',
-  product_id: '', product_name: '', status: 'active' as const, bill_no: '', amount: '',
+  product_id: '', product_name: '', status: 'active' as 'active' | 'completed' | 'on-hold', bill_no: '', amount: '',
 };
 
 export default function ProjectsPage() {
