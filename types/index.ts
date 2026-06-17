@@ -100,13 +100,13 @@ export interface Project {
 
   // Pipeline stages
   stage_artwork?: string;
+  stage_proof?: string;
+  stage_followup?: string;
   stage_production?: string;
   stage_billing?: string;
   stage_delivery?: string;
-  stage_proof?: string;
-  stage_followup?: string;
-  stage_feedback?: string;
   stage_review?: string;
+  stage_feedback?: string;
 
   created_at: string;
   updated_at: string;
@@ -120,15 +120,17 @@ export interface Campaign {
   created_at: string;
 }
 
+// Order matches the wireframe's left-to-right flow:
+// Artwork -> Proof -> Followup -> Production -> Billing -> Delivery -> Review -> Feedback
 export const PIPELINE_STAGES = [
   { key: 'stage_artwork',    label: 'Artwork' },
+  { key: 'stage_proof',      label: 'Proof' },
+  { key: 'stage_followup',   label: 'Follow-up' },
   { key: 'stage_production', label: 'Production' },
   { key: 'stage_billing',    label: 'Billing' },
   { key: 'stage_delivery',   label: 'Delivery' },
-  { key: 'stage_proof',      label: 'Proof' },
-  { key: 'stage_followup',   label: 'Follow-up' },
-  { key: 'stage_feedback',   label: 'Feedback' },
   { key: 'stage_review',     label: 'Review' },
+  { key: 'stage_feedback',   label: 'Feedback' },
 ] as const;
 
 export type PipelineStageKey = typeof PIPELINE_STAGES[number]['key'];

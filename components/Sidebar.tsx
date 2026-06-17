@@ -9,8 +9,8 @@ const links = [
   { href: '/dashboard',           label: 'Dashboard',  icon: LayoutDashboard },
   { href: '/dashboard/contacts',  label: 'Contacts',   icon: Users },
   { href: '/dashboard/projects',  label: 'Orders',     icon: FolderOpen },
-  { href: '/dashboard/products',  label: 'Products',   icon: Package },
   { href: '/dashboard/campaigns', label: 'Campaigns',  icon: Megaphone },
+  { href: '/dashboard/products',  label: 'Products',   icon: Package },
 ];
 
 export default function Sidebar() {

@@ -89,14 +89,15 @@ create table if not exists projects (
   status           text default 'active',        -- active | completed | on-hold
 
   -- Order pipeline stages (timestamp = completed, null = pending)
+  -- Flow: Artwork -> Proof -> Followup -> Production -> Billing -> Delivery -> Review -> Feedback
   stage_artwork     timestamptz,
+  stage_proof       timestamptz,
+  stage_followup    timestamptz,
   stage_production  timestamptz,
   stage_billing     timestamptz,
   stage_delivery    timestamptz,
-  stage_proof       timestamptz,
-  stage_followup    timestamptz,
-  stage_feedback    timestamptz,
   stage_review      timestamptz,
+  stage_feedback    timestamptz,
 
   bill_no          text,
   amount           numeric(12,2),
