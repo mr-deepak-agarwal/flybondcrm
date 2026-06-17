@@ -170,9 +170,9 @@ export default function DashboardPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem' }}>
               {stats.pipelineOrders.map(order => {
                 const stageKeys = PIPELINE_STAGES.map(s => s.key);
-                const completedCount = stageKeys.filter(k => !!(order as Record<string, unknown>)[k]).length;
+                const completedCount = stageKeys.filter(k => !!(order as unknown as Record<string, unknown>)[k]).length;
                 const pct = Math.round((completedCount / stageKeys.length) * 100);
-                const nextStage = PIPELINE_STAGES.find(s => !(order as Record<string, unknown>)[s.key]);
+                const nextStage = PIPELINE_STAGES.find(s => !(order as unknown as Record<string, unknown>)[s.key]);
                 return (
                   <Link key={order.id} href={`/dashboard/projects`} style={{ textDecoration: 'none' }}>
                     <div style={{
@@ -206,7 +206,7 @@ export default function DashboardPage() {
                       {/* Stage dots */}
                       <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
                         {PIPELINE_STAGES.map(s => {
-                          const done = !!(order as Record<string, unknown>)[s.key];
+                          const done = !!(order as unknown as Record<string, unknown>)[s.key];
                           return (
                             <div key={s.key} title={s.label} style={{
                               width: '7px', height: '7px', borderRadius: '50%',
