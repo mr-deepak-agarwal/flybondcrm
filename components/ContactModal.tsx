@@ -208,12 +208,31 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
     };
     Object.keys(payload).forEach(k => { if (payload[k] === '') payload[k] = null; });
 
+    let error;
+    let data;
+
     if (contact) {
-      await supabase.from('contacts').update(payload).eq('id', contact.id);
+      ({ data, error } = await supabase.from('contacts').update(payload).eq('id', contact.id).select());
     } else {
-      await supabase.from('contacts').insert(payload);
+      ({ data, error } = await supabase.from('contacts').insert(payload).select());
     }
+
     setSaving(false);
+
+    if (error) {
+      console.error('Supabase save error:', error);
+      alert(`Failed to save contact: ${error.message}`);
+      return;
+    }
+
+    if (!data || data.length === 0) {
+      // No error, but no row came back — almost always a Row Level Security
+      // policy silently blocking the write (insert/update "succeeds" with 0 rows).
+      console.error('Save returned no rows — likely blocked by RLS policy.');
+      alert('Save did not affect any rows. This usually means the database rejected the write (e.g. a Row Level Security policy) without raising an error. Check that you are logged in and that your Supabase RLS policies allow this operation.');
+      return;
+    }
+
     onSaved();
   }
 
