@@ -68,6 +68,54 @@ interface Props {
   onSaved: () => void;
 }
 
+// ── field components (defined OUTSIDE ContactModal so they keep a ──
+// ── stable identity across renders — this is what preserves focus) ──
+interface FProps {
+  label: string;
+  field: keyof typeof EMPTY;
+  type?: string;
+  placeholder?: string;
+  span?: number;
+  value: string;
+  onChange: (field: keyof typeof EMPTY, value: string) => void;
+}
+function F({ label, field, type = 'text', placeholder = '', span = 1, value, onChange }: FProps) {
+  return (
+    <div style={{ gridColumn: `span ${span}` }}>
+      <label>{label}</label>
+      <input
+        className="input"
+        type={type}
+        placeholder={placeholder}
+        value={value || ''}
+        onChange={e => onChange(field, e.target.value)}
+      />
+    </div>
+  );
+}
+
+interface SelProps {
+  label: string;
+  field: keyof typeof EMPTY;
+  options: { value: string; label: string }[];
+  value: string;
+  onChange: (field: keyof typeof EMPTY, value: string) => void;
+}
+function Sel({ label, field, options, value, onChange }: SelProps) {
+  return (
+    <div>
+      <label>{label}</label>
+      <select
+        className="input"
+        value={value || ''}
+        onChange={e => onChange(field, e.target.value)}
+      >
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+    </div>
+  );
+}
+
 // ── helper: days until next call ─────────────────────────
 function daysUntilCall(dateStr?: string): { label: string; color: string } | null {
   if (!dateStr) return null;
@@ -211,37 +259,6 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
     setCampToggling(null);
   }
 
-  // ── field helpers ────────────────────────────────────────
-  const F = ({ label, field, type = 'text', placeholder = '', span = 1 }: {
-    label: string; field: keyof typeof EMPTY; type?: string; placeholder?: string; span?: number;
-  }) => (
-    <div style={{ gridColumn: `span ${span}` }}>
-      <label>{label}</label>
-      <input
-        className="input"
-        type={type}
-        placeholder={placeholder}
-        value={(form[field] as string) || ''}
-        onChange={e => set(field, e.target.value)}
-      />
-    </div>
-  );
-
-  const Sel = ({ label, field, options }: {
-    label: string; field: keyof typeof EMPTY; options: { value: string; label: string }[];
-  }) => (
-    <div>
-      <label>{label}</label>
-      <select
-        className="input"
-        value={(form[field] as string) || ''}
-        onChange={e => set(field, e.target.value)}
-      >
-        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-    </div>
-  );
-
   const callBadge = daysUntilCall(form.next_call_date as string);
 
   return (
@@ -326,14 +343,14 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
                   { value: 'Ms.',   label: 'Ms.' },
                   { value: 'Mrs.',  label: 'Mrs.' },
                   { value: 'Dr.',   label: 'Dr.' },
-                ]} />
-                <F label="First Name *" field="first_name" placeholder="Sunil" />
-                <F label="Middle Name"  field="middle_name" placeholder="Kumar" />
-                <F label="Last Name"    field="last_name"   placeholder="Rajoli" />
+                ]} value={form.title as string} onChange={set} />
+                <F label="First Name *" field="first_name" placeholder="Sunil" value={form.first_name as string} onChange={set} />
+                <F label="Middle Name"  field="middle_name" placeholder="Kumar" value={form.middle_name as string} onChange={set} />
+                <F label="Last Name"    field="last_name"   placeholder="Rajoli" value={form.last_name as string} onChange={set} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-                <F label="Company / Organisation" field="company"    placeholder="FlyBond Pvt. Ltd." />
-                <F label="Job Title"              field="job_title"  placeholder="Client Servicing Executive" />
+                <F label="Company / Organisation" field="company"    placeholder="FlyBond Pvt. Ltd." value={form.company as string} onChange={set} />
+                <F label="Job Title"              field="job_title"  placeholder="Client Servicing Executive" value={form.job_title as string} onChange={set} />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
                 <Sel label="Contact Type" field="contact_type" options={[
@@ -342,9 +359,9 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
                   { value: 'supplier',  label: 'Supplier' },
                   { value: 'agent',     label: 'Agent' },
                   { value: 'prospect',  label: 'Prospect' },
-                ]} />
-                <F label="Category" field="category" placeholder="e.g. Hospitality" />
-                <F label="Segment"  field="segment"  placeholder="e.g. SMB" />
+                ]} value={form.contact_type as string} onChange={set} />
+                <F label="Category" field="category" placeholder="e.g. Hospitality" value={form.category as string} onChange={set} />
+                <F label="Segment"  field="segment"  placeholder="e.g. SMB" value={form.segment as string} onChange={set} />
               </div>
 
               {/* Star Rating */}
@@ -382,49 +399,49 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
 
           {tab === 'address' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <F label="Address Line"  field="address_line" placeholder="123, MG Road"  span={2} />
-              <F label="Area / Village" field="area"        placeholder="Panjim" />
-              <F label="Taluka"         field="taluka"      placeholder="Tiswadi" />
-              <F label="District"       field="district"    placeholder="North Goa" />
-              <F label="State"          field="state"       placeholder="Goa" />
-              <F label="PIN Code"       field="pin"         placeholder="403001" />
+              <F label="Address Line"  field="address_line" placeholder="123, MG Road"  span={2} value={form.address_line as string} onChange={set} />
+              <F label="Area / Village" field="area"        placeholder="Panjim" value={form.area as string} onChange={set} />
+              <F label="Taluka"         field="taluka"      placeholder="Tiswadi" value={form.taluka as string} onChange={set} />
+              <F label="District"       field="district"    placeholder="North Goa" value={form.district as string} onChange={set} />
+              <F label="State"          field="state"       placeholder="Goa" value={form.state as string} onChange={set} />
+              <F label="PIN Code"       field="pin"         placeholder="403001" value={form.pin as string} onChange={set} />
             </div>
           )}
 
           {tab === 'contact' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <F label="Mobile / WhatsApp"      field="mobile"   placeholder="+91 98765 43210" />
-              <F label="WhatsApp (if different)" field="whatsapp" placeholder="+91 98765 43210" />
-              <F label="Telephone"              field="phone"    placeholder="+91 832 271 2228" />
-              <F label="Telephone 2"            field="phone_2"  placeholder="+91 832 271 2229" />
-              <F label="Email"                  field="email"    type="email" placeholder="sunil@flybond.in" />
-              <F label="Email 2"                field="email_2"  type="email" placeholder="accounts@flybond.in" />
+              <F label="Mobile / WhatsApp"      field="mobile"   placeholder="+91 98765 43210" value={form.mobile as string} onChange={set} />
+              <F label="WhatsApp (if different)" field="whatsapp" placeholder="+91 98765 43210" value={form.whatsapp as string} onChange={set} />
+              <F label="Telephone"              field="phone"    placeholder="+91 832 271 2228" value={form.phone as string} onChange={set} />
+              <F label="Telephone 2"            field="phone_2"  placeholder="+91 832 271 2229" value={form.phone_2 as string} onChange={set} />
+              <F label="Email"                  field="email"    type="email" placeholder="sunil@flybond.in" value={form.email as string} onChange={set} />
+              <F label="Email 2"                field="email_2"  type="email" placeholder="accounts@flybond.in" value={form.email_2 as string} onChange={set} />
             </div>
           )}
 
           {tab === 'online' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <F label="Website"           field="website"       placeholder="https://flybond.in" />
-              <F label="Google Review URL" field="google_review" placeholder="https://g.page/..." />
-              <F label="Instagram Handle"  field="instagram"     placeholder="@flybond" />
-              <F label="Facebook Page"     field="facebook"      placeholder="fb.com/flybond" />
+              <F label="Website"           field="website"       placeholder="https://flybond.in" value={form.website as string} onChange={set} />
+              <F label="Google Review URL" field="google_review" placeholder="https://g.page/..." value={form.google_review as string} onChange={set} />
+              <F label="Instagram Handle"  field="instagram"     placeholder="@flybond" value={form.instagram as string} onChange={set} />
+              <F label="Facebook Page"     field="facebook"      placeholder="fb.com/flybond" value={form.facebook as string} onChange={set} />
             </div>
           )}
 
           {tab === 'legal' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <F label="GST Number"      field="gst_no"           placeholder="27AAPFU0939F1ZV" />
-              <F label="PAN Number"      field="pan_no"           placeholder="AAPFU0939F" />
-              <F label="Aadhar Number"   field="aadhar_no"        placeholder="XXXX XXXX XXXX" />
-              <F label="Driving License" field="driving_license"  placeholder="GA-0120110012345" />
+              <F label="GST Number"      field="gst_no"           placeholder="27AAPFU0939F1ZV" value={form.gst_no as string} onChange={set} />
+              <F label="PAN Number"      field="pan_no"           placeholder="AAPFU0939F" value={form.pan_no as string} onChange={set} />
+              <F label="Aadhar Number"   field="aadhar_no"        placeholder="XXXX XXXX XXXX" value={form.aadhar_no as string} onChange={set} />
+              <F label="Driving License" field="driving_license"  placeholder="GA-0120110012345" value={form.driving_license as string} onChange={set} />
             </div>
           )}
 
           {tab === 'owner' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
-              <F label="Owner / Proprietor Name" field="owner_name"      placeholder="Ramesh Rajoli" span={2} />
-              <F label="Owner Mobile"            field="owner_mobile"    placeholder="+91 98765 43210" />
-              <F label="Owner WhatsApp"          field="owner_whatsapp"  placeholder="+91 98765 43210" />
+              <F label="Owner / Proprietor Name" field="owner_name"      placeholder="Ramesh Rajoli" span={2} value={form.owner_name as string} onChange={set} />
+              <F label="Owner Mobile"            field="owner_mobile"    placeholder="+91 98765 43210" value={form.owner_mobile as string} onChange={set} />
+              <F label="Owner WhatsApp"          field="owner_whatsapp"  placeholder="+91 98765 43210" value={form.owner_whatsapp as string} onChange={set} />
             </div>
           )}
 
@@ -437,26 +454,26 @@ export default function ContactModal({ contact, onClose, onSaved }: Props) {
                 { value: 'active',      label: 'Active' },
                 { value: 'loyal',       label: 'Loyal' },
                 { value: 'blacklisted', label: 'Blacklisted' },
-              ]} />
+              ]} value={form.status as string} onChange={set} />
               <Sel label="Frequency" field="frequency_type" options={[
                 { value: 'unassigned',  label: 'Unassigned' },
                 { value: '1time',       label: '1-Time' },
                 { value: 'regular',     label: 'Regular' },
                 { value: 'loyal',       label: 'Loyal' },
                 { value: 'blacklisted', label: 'Blacklisted' },
-              ]} />
-              <F label="Assigned To" field="assigned_to" placeholder="Deepak Agarwal" />
+              ]} value={form.frequency_type as string} onChange={set} />
+              <F label="Assigned To" field="assigned_to" placeholder="Deepak Agarwal" value={form.assigned_to as string} onChange={set} />
               <Sel label="Pending Status" field="pending_status" options={[
                 { value: '',      label: 'None' },
                 { value: 'quote', label: 'Quote' },
                 { value: 'order', label: 'Order' },
                 { value: 'bill',  label: 'Bill' },
-              ]} />
-              <F label="Next Call Date"   field="next_call_date"   type="date" />
+              ]} value={form.pending_status as string} onChange={set} />
+              <F label="Next Call Date"   field="next_call_date"   type="date" value={form.next_call_date as string} onChange={set} />
               <Sel label="Call Significance" field="call_significance" options={[
                 { value: 'significant',   label: 'Significant' },
                 { value: 'insignificant', label: 'Insignificant' },
-              ]} />
+              ]} value={form.call_significance as string} onChange={set} />
             </div>
           )}
 
