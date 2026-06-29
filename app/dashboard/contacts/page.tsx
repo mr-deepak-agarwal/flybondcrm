@@ -56,16 +56,28 @@ export default function ContactsPage() {
     else { setToast({ msg: 'Contact deleted', type: 'success' }); load(); }
   }
 
+  // Every text-ish field a person might plausibly search by.
+  // (Status/contact_type/etc. are technically text too, but searching
+  // those by typing "prospect" is unlikely — kept to fields with
+  // free-form, person-entered values.)
+  const SEARCHABLE_FIELDS: (keyof Contact)[] = [
+    'title', 'first_name', 'middle_name', 'last_name', 'company', 'job_title',
+    'category', 'segment', 'assigned_to',
+    'address_line', 'area', 'taluka', 'district', 'state', 'pin',
+    'phone', 'phone_2', 'mobile', 'whatsapp', 'email', 'email_2',
+    'website', 'instagram', 'facebook', 'google_review',
+    'gst_no', 'pan_no', 'aadhar_no', 'driving_license',
+    'owner_name', 'owner_mobile', 'owner_whatsapp',
+    'notes', 'pending_status',
+  ];
+
   const filtered = contacts.filter(c => {
     if (!search) return true;
     const q = search.toLowerCase();
-    return (
-      contactDisplayName(c).toLowerCase().includes(q) ||
-      (c.company || '').toLowerCase().includes(q) ||
-      (c.mobile || '').toLowerCase().includes(q) ||
-      (c.phone || '').toLowerCase().includes(q) ||
-      (c.email || '').toLowerCase().includes(q)
-    );
+    return SEARCHABLE_FIELDS.some(field => {
+      const value = c[field];
+      return typeof value === 'string' && value.toLowerCase().includes(q);
+    });
   });
 
   return (
