@@ -24,7 +24,7 @@ export default function ContactsPage() {
     // in one round trip, rather than N+1 queries per row.
     const { data, error } = await supabase
       .from('branches')
-      .select('*, contacts(*, contact_phones(*))')
+      .select('*, contacts(*, phones:contact_phones(*))')
       .order('created_at', { ascending: false });
     if (error) setToast({ msg: error.message, type: 'error' });
     setBranches(data || []);

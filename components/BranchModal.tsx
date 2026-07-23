@@ -115,6 +115,34 @@ function supabaseErrorMessage(err: unknown): string {
   return String(err);
 }
 
+// Real, writable columns on `contacts`. Building the save payload from this
+// explicit list (rather than spreading the whole draft object) means any
+// joined/computed field accidentally attached to a person — like the
+// `contact_phones` join, or a future one — can never leak into an insert/
+// update and get rejected by Postgres as an unknown column.
+const CONTACT_COLUMNS: (keyof PersonDraft)[] = [
+  'company_id', 'is_primary', 'designation',
+  'title', 'first_name', 'middle_name', 'last_name', 'company', 'job_title',
+  'contact_type', 'category', 'segment', 'status', 'frequency_type', 'star_rating', 'assigned_to',
+  'address_line', 'area', 'taluka', 'district', 'state', 'pin',
+  'phone', 'phone_2', 'mobile', 'whatsapp', 'email', 'email_2',
+  'website', 'instagram', 'facebook', 'google_review',
+  'gst_no', 'pan_no', 'aadhar_no', 'driving_license',
+  'owner_name', 'owner_mobile', 'owner_whatsapp',
+  'next_call_date', 'call_significance', 'notes', 'pending_status',
+];
+
+function toContactPayload(p: PersonDraft, companyId: string): Record<string, unknown> {
+  const payload: Record<string, unknown> = { company_id: companyId };
+  for (const key of CONTACT_COLUMNS) {
+    if (key === 'company_id') continue; // set explicitly above
+    const value = p[key];
+    payload[key] = value === '' ? null : value;
+  }
+  payload.updated_at = new Date().toISOString();
+  return payload;
+}
+
 interface Campaign { id: string; name: string; description?: string; }
 
 interface Props {
@@ -275,9 +303,8 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
 
       // 3. Upsert each person, then replace their phones.
       for (const p of people) {
-        const { isNew, phones, id, ...rest } = p;
-        const personPayload: Record<string, unknown> = { ...rest, company_id: branchId, updated_at: new Date().toISOString() };
-        Object.keys(personPayload).forEach(k => { if (personPayload[k] === '') personPayload[k] = null; });
+        const { isNew, phones, id } = p;
+        const personPayload = toContactPayload(p, branchId);
 
         let personId = id;
         if (isNew) {
