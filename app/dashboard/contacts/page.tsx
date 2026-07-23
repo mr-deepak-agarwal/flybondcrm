@@ -1,47 +1,41 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { Plus, Search, Pencil, Trash2, Phone, Star, Users } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, Phone, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import Toast from '@/components/Toast';
-import ContactModal from '@/components/ContactModal';
-import type { Contact } from '@/types';
-import { contactDisplayName } from '@/types';
-
-function daysUntilCall(dateStr?: string): { label: string; color: string } | null {
-  if (!dateStr) return null;
-  const diff = Math.ceil((new Date(dateStr).getTime() - Date.now()) / 86_400_000);
-  if (diff < 0)   return { label: `${Math.abs(diff)}d overdue`, color: 'var(--error, #ef4444)' };
-  if (diff === 0) return { label: 'Today',                      color: 'var(--warning, #f59e0b)' };
-  if (diff <= 3)  return { label: `in ${diff}d`,                color: 'var(--warning, #f59e0b)' };
-  return            { label: `in ${diff}d`,                      color: 'var(--success, #10b981)' };
-}
+import BranchModal from '@/components/BranchModal';
+import type { Branch } from '@/types';
+import { primaryContact, contactDisplayName } from '@/types';
 
 export default function ContactsPage() {
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading]   = useState(true);
-  const [search, setSearch]     = useState('');
-  const [editing, setEditing]   = useState<Contact | null>(null);
+  const [branches, setBranches] = useState<Branch[]>([]);
+  const [loading, setLoading]    = useState(true);
+  const [search, setSearch]      = useState('');
+  const [showAll, setShowAll]    = useState(true); // "Show All" button from the wireframe — toggles filtered/full list
+  const [editing, setEditing]    = useState<Branch | null>(null);
   const [showModal, setShowModal] = useState(false);
-  const [toast, setToast]       = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
+  const [toast, setToast]        = useState<{ msg: string; type: 'success' | 'error' } | null>(null);
   const supabase = createClient();
 
   const load = useCallback(async () => {
     setLoading(true);
+    // Pull each branch together with its linked people (and each person's phones)
+    // in one round trip, rather than N+1 queries per row.
     const { data, error } = await supabase
-      .from('contacts')
-      .select('*')
+      .from('branches')
+      .select('*, contacts(*, contact_phones(*))')
       .order('created_at', { ascending: false });
     if (error) setToast({ msg: error.message, type: 'error' });
-    setContacts(data || []);
+    setBranches(data || []);
     setLoading(false);
   }, [supabase]);
 
   useEffect(() => { load(); }, [load]);
 
-  function openAdd()           { setEditing(null); setShowModal(true); }
-  function openEdit(c: Contact) { setEditing(c); setShowModal(true); }
-  function close()             { setShowModal(false); }
+  function openAdd()            { setEditing(null); setShowModal(true); }
+  function openEdit(b: Branch)  { setEditing(b); setShowModal(true); }
+  function close()              { setShowModal(false); }
 
   function onSaved() {
     close();
@@ -50,33 +44,35 @@ export default function ContactsPage() {
   }
 
   async function del(id: string) {
-    if (!confirm('Delete this contact?')) return;
-    const { error } = await supabase.from('contacts').delete().eq('id', id);
+    if (!confirm('Delete this contact and everyone linked to it?')) return;
+    const { error } = await supabase.from('branches').delete().eq('id', id);
     if (error) setToast({ msg: error.message, type: 'error' });
     else { setToast({ msg: 'Contact deleted', type: 'success' }); load(); }
   }
 
-  // Every text-ish field a person might plausibly search by.
-  // (Status/contact_type/etc. are technically text too, but searching
-  // those by typing "prospect" is unlikely — kept to fields with
-  // free-form, person-entered values.)
-  const SEARCHABLE_FIELDS: (keyof Contact)[] = [
-    'title', 'first_name', 'middle_name', 'last_name', 'company', 'job_title',
-    'category', 'segment', 'assigned_to',
-    'address_line', 'area', 'taluka', 'district', 'state', 'pin',
-    'phone', 'phone_2', 'mobile', 'whatsapp', 'email', 'email_2',
-    'website', 'instagram', 'facebook', 'google_review',
-    'gst_no', 'pan_no', 'aadhar_no', 'driving_license',
-    'owner_name', 'owner_mobile', 'owner_whatsapp',
-    'notes', 'pending_status',
+  const SEARCHABLE_BRANCH_FIELDS: (keyof Branch)[] = [
+    'name', 'branch_code', 'category', 'segment', 'assigned_to',
+    'area', 'town', 'taluka', 'district', 'state', 'pin',
   ];
 
-  const filtered = contacts.filter(c => {
+  const filtered = branches.filter(b => {
+    // "Show All" (wireframe button) vs. the default filtered view — for now, the
+    // default view hides branches marked Dump; Show All removes that filter.
+    if (!showAll && b.status === 'Dump') return false;
+
     if (!search) return true;
     const q = search.toLowerCase();
-    return SEARCHABLE_FIELDS.some(field => {
-      const value = c[field];
+
+    if (SEARCHABLE_BRANCH_FIELDS.some(field => {
+      const value = b[field];
       return typeof value === 'string' && value.toLowerCase().includes(q);
+    })) return true;
+
+    // Also search across every linked person's name/mobile.
+    return (b.contacts || []).some(c => {
+      const name = contactDisplayName(c).toLowerCase();
+      const phones = (c.phones || []).map(p => p.number.toLowerCase());
+      return name.includes(q) || phones.some(p => p.includes(q));
     });
   });
 
@@ -89,7 +85,7 @@ export default function ContactsPage() {
         <div>
           <h1 style={{ fontSize: '1.75rem', fontWeight: 800, margin: 0 }}>Contacts</h1>
           <p style={{ color: 'var(--text-muted)', marginTop: '0.3rem', fontSize: '0.875rem' }}>
-            {contacts.length} total
+            {branches.length} total
           </p>
         </div>
         <button className="btn-primary" onClick={openAdd}>
@@ -97,30 +93,39 @@ export default function ContactsPage() {
         </button>
       </div>
 
-      {/* Search */}
-      <div className="search-wrap" style={{ marginBottom: '1.25rem', maxWidth: '340px' }}>
-        <Search size={14} />
-        <input
-          className="input"
-          placeholder="Search name, company, phone, email…"
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
+      {/* Search + Show All */}
+      <div style={{ display: 'flex', gap: '0.75rem', alignItems: 'center', marginBottom: '1.25rem', flexWrap: 'wrap' }}>
+        <div className="search-wrap" style={{ maxWidth: '340px', flex: 1 }}>
+          <Search size={14} />
+          <input
+            className="input"
+            placeholder="Search name, company, phone, email…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <button
+          className="btn-secondary"
+          onClick={() => setShowAll(v => !v)}
+          style={{ fontSize: '0.8rem' }}
+        >
+          {showAll ? 'Hide dumped' : 'Show All'}
+        </button>
       </div>
 
       {/* List */}
       <div className="glass" style={{ overflow: 'hidden' }}>
-        {/* Column header */}
+        {/* Column header — matches the client's wireframe columns */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '1.4fr 1fr 1fr 0.9fr 0.9fr 0.8fr 70px',
+          gridTemplateColumns: '90px 1.3fr 1.1fr 1fr 0.9fr 0.9fr 0.8fr 0.7fr 70px',
           padding: '0.6rem 1rem',
           background: 'var(--surface-2)',
           borderBottom: '1px solid var(--border)',
           alignItems: 'center',
           gap: '0.5rem',
         }}>
-          {['Name', 'Company', 'Phone / WhatsApp', 'Status', 'Next Call', 'Rating', ''].map(h => (
+          {['Customer ID', 'Company Name', 'Name Person', 'Mobile', 'Locality', 'Place / Town', 'Branch Code', 'Pin Code', ''].map(h => (
             <span key={h} style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
               {h}
             </span>
@@ -140,15 +145,16 @@ export default function ContactsPage() {
               </>
             )}
           </div>
-        ) : filtered.map(c => {
-          const callBadge = daysUntilCall(c.next_call_date);
+        ) : filtered.map(b => {
+          const person = primaryContact(b);
+          const mobile = person?.phones?.[0]?.number;
           return (
             <div
-              key={c.id}
-              onClick={() => openEdit(c)}
+              key={b.id}
+              onClick={() => openEdit(b)}
               style={{
                 display: 'grid',
-                gridTemplateColumns: '1.4fr 1fr 1fr 0.9fr 0.9fr 0.8fr 70px',
+                gridTemplateColumns: '90px 1.3fr 1.1fr 1fr 0.9fr 0.9fr 0.8fr 0.7fr 70px',
                 padding: '0.75rem 1rem',
                 borderBottom: '1px solid rgba(39,44,61,0.5)',
                 alignItems: 'center',
@@ -158,56 +164,50 @@ export default function ContactsPage() {
               onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface-2)')}
               onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
             >
+              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                {b.customer_id}
+              </span>
+
               <div style={{ minWidth: 0 }}>
                 <p style={{ fontWeight: 600, fontSize: '0.8125rem', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {contactDisplayName(c) || '—'}
+                  {b.name || '—'}
                 </p>
-                {c.job_title && (
-                  <p style={{ fontSize: '0.72rem', color: 'var(--text-muted)', margin: '0.1rem 0 0 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {c.job_title}
-                  </p>
-                )}
+                {b.status && <span className={`badge badge-${b.status.toLowerCase().replace(/\s+/g, '-')}`} style={{ fontSize: '0.65rem', marginTop: '0.15rem' }}>{b.status}</span>}
               </div>
 
-              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {c.company || '—'}
-              </span>
+              <div style={{ minWidth: 0 }}>
+                <p style={{ fontSize: '0.8rem', margin: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {person ? contactDisplayName(person) : '—'}
+                </p>
+                {person?.designation && (
+                  <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', margin: 0 }}>{person.designation}</p>
+                )}
+              </div>
 
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '0.35rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {(c.mobile || c.phone) && <Phone size={11} style={{ flexShrink: 0 }} />}
-                {c.mobile || c.phone || '—'}
+                {mobile && <Phone size={11} style={{ flexShrink: 0 }} />}
+                {mobile || '—'}
               </span>
 
-              <div>
-                {c.status && <span className={`badge badge-${c.status}`} style={{ fontSize: '0.7rem' }}>{c.status}</span>}
-              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {b.area || '—'}
+              </span>
 
-              <div>
-                {callBadge ? (
-                  <span style={{
-                    fontSize: '0.7rem', fontWeight: 700, color: callBadge.color,
-                    background: `${callBadge.color}18`, border: `1px solid ${callBadge.color}40`,
-                    padding: '0.15rem 0.5rem', borderRadius: '20px', whiteSpace: 'nowrap',
-                  }}>
-                    {callBadge.label}
-                  </span>
-                ) : (
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>—</span>
-                )}
-              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-dim)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {b.town || '—'}
+              </span>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
-                {c.star_rating ? (
-                  <>
-                    <Star size={12} fill="var(--warning)" color="var(--warning)" />
-                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{c.star_rating}</span>
-                  </>
-                ) : <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>—</span>}
-              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                {b.branch_code || '—'}
+              </span>
+
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                {b.pin || '—'}
+              </span>
 
               <div style={{ display: 'flex', gap: '0.3rem', justifyContent: 'flex-end' }}>
-                <button className="btn-icon" onClick={e => { e.stopPropagation(); openEdit(c); }}><Pencil size={12} /></button>
-                <button className="btn-icon danger" onClick={e => { e.stopPropagation(); del(c.id); }}><Trash2 size={12} /></button>
+                <button className="btn-icon" onClick={e => { e.stopPropagation(); openEdit(b); }}><Pencil size={12} /></button>
+                <button className="btn-icon danger" onClick={e => { e.stopPropagation(); del(b.id); }}><Trash2 size={12} /></button>
               </div>
             </div>
           );
@@ -215,8 +215,8 @@ export default function ContactsPage() {
       </div>
 
       {showModal && (
-        <ContactModal
-          contact={editing}
+        <BranchModal
+          branch={editing}
           onClose={close}
           onSaved={onSaved}
         />
