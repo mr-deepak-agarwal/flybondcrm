@@ -7,7 +7,9 @@ import Toast from '@/components/Toast';
 import type { Project, Contact, Product } from '@/types';
 import { PIPELINE_STAGES, contactDisplayName } from '@/types';
 
-type ContactDropdown = Pick<Contact, 'id' | 'first_name' | 'middle_name' | 'last_name' | 'company' | 'title'>;
+type ContactDropdown = Pick<Contact, 'id' | 'first_name' | 'middle_name' | 'last_name' | 'title'> & {
+  branches?: { name: string }[] | null; // joined via company_id — the branch this person belongs to
+};
 
 
 const emptyForm = {
@@ -32,7 +34,7 @@ export default function ProjectsPage() {
     setLoading(true);
     const [{ data: proj }, { data: cont }, { data: prod }] = await Promise.all([
       supabase.from('projects').select('*').order('created_at', { ascending: false }),
-      supabase.from('contacts').select('id,first_name,middle_name,last_name,company,title').order('first_name'),
+      supabase.from('contacts').select('id,first_name,middle_name,last_name,title,branches(name)').order('first_name'),
       supabase.from('products').select('*').order('name'),
     ]);
     setProjects(proj || []);
@@ -241,7 +243,7 @@ export default function ProjectsPage() {
                     <option value="">— Select contact —</option>
                     {contacts.map(c => (
                       <option key={c.id} value={c.id}>
-                        {contactDisplayName(c)} {c.company ? `(${c.company})` : ''}
+                        {contactDisplayName(c)} {c.branches?.[0]?.name ? `(${c.branches[0].name})` : ''}
                       </option>
                     ))}
                   </select>

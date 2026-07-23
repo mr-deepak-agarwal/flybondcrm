@@ -52,7 +52,7 @@ export default function DashboardPage() {
       { data: pipelineRaw },
     ] = await Promise.all([
       supabase.auth.getUser(),
-      supabase.from('contacts').select('*', { count: 'exact', head: true }),
+      supabase.from('branches').select('*', { count: 'exact', head: true }),
       supabase.from('products').select('*', { count: 'exact', head: true }),
       supabase.from('projects').select('id,client_name,status,created_at').order('created_at', { ascending: false }).limit(5),
       supabase.from('projects')
