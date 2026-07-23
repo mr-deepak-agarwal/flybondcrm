@@ -104,6 +104,17 @@ const TABS = [
   { key: 'campaigns', label: 'Campaigns',     icon: Megaphone },
 ];
 
+function supabaseErrorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object') {
+    const e = err as { message?: string; details?: string; hint?: string; code?: string };
+    const parts = [e.message, e.details, e.hint].filter(Boolean);
+    if (parts.length) return `${parts.join(' — ')}${e.code ? ` (code ${e.code})` : ''}`;
+    try { return JSON.stringify(err); } catch { /* fall through */ }
+  }
+  return String(err);
+}
+
 interface Campaign { id: string; name: string; description?: string; }
 
 interface Props {
@@ -253,6 +264,15 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
         await supabase.from('contacts').delete().in('id', removedPeopleIds);
       }
 
+      // 2b. Clear is_primary for every existing person on this branch first.
+      // Without this, switching who's primary can momentarily try to set
+      // TWO rows to is_primary = true (old one still true, new one being set)
+      // in the same branch, which violates the one-primary-per-branch unique
+      // index depending on which order `people` happens to be in.
+      if (branch) {
+        await supabase.from('contacts').update({ is_primary: false }).eq('company_id', branchId);
+      }
+
       // 3. Upsert each person, then replace their phones.
       for (const p of people) {
         const { isNew, phones, id, ...rest } = p;
@@ -283,7 +303,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
       onSaved();
     } catch (err) {
       console.error('Save error:', err);
-      alert(`Failed to save: ${err instanceof Error ? err.message : String(err)}`);
+      alert(`Failed to save: ${supabaseErrorMessage(err)}`);
     } finally {
       setSaving(false);
     }
