@@ -170,6 +170,14 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   const [linkedCampaigns, setLinkedCampaigns] = useState<Set<string>>(new Set());
   const [campToggling, setCampToggling]       = useState<string | null>(null);
 
+  // Known companies (for Company Name autocomplete + auto-filling the
+  // Address tab when the same company + branch has been entered before).
+  const [knownBranches, setKnownBranches] = useState<Pick<Branch,
+    'name' | 'branch_code' | 'address_type' | 'shop_no' | 'building_name' |
+    'lane_street' | 'landmark' | 'area' | 'town' | 'pin' | 'taluka' | 'district' | 'state'
+  >[]>([]);
+  const [addressAutoFilled, setAddressAutoFilled] = useState(false);
+
   const supabase = createClient();
   const primaryId = people.find(p => p.is_primary)?.id;
 
@@ -221,6 +229,56 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   useEffect(() => {
     actEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [activities]);
+
+  // Load existing companies once, for the Company Name autocomplete.
+  useEffect(() => {
+    supabase
+      .from('branches')
+      .select('name, branch_code, address_type, shop_no, building_name, lane_street, landmark, area, town, pin, taluka, district, state')
+      .order('name')
+      .then(({ data }) => setKnownBranches(data || []));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // If the company name + branch code the user just typed matches an
+  // existing branch, auto-fill the Address tab from that record instead
+  // of making them re-type an address that's already on file. Only for
+  // brand-new branches — never overwrites an address being edited.
+  useEffect(() => {
+    const name = form.name.trim().toLowerCase();
+    const code = (form.branch_code || '').trim().toLowerCase();
+    const match = branch || !name || !code
+      ? undefined
+      : knownBranches.find(b =>
+          b.name.trim().toLowerCase() === name &&
+          (b.branch_code || '').trim().toLowerCase() === code
+        );
+
+    setAddressAutoFilled(!!match); // eslint-disable-line react-hooks/set-state-in-effect
+    if (match) {
+      setForm(prev => ({
+        ...prev,
+        address_type: match.address_type || prev.address_type,
+        shop_no: match.shop_no || '',
+        building_name: match.building_name || '',
+        lane_street: match.lane_street || '',
+        landmark: match.landmark || '',
+        area: match.area || '',
+        town: match.town || '',
+        pin: match.pin || '',
+        taluka: match.taluka || '',
+        district: match.district || '',
+        state: match.state || '',
+      }));
+    }
+  }, [form.name, form.branch_code, knownBranches, branch]);
+
+  const companyNameOptions = Array.from(new Set(knownBranches.map(b => b.name).filter(Boolean))).sort();
+  const branchCodeOptions = Array.from(new Set(
+    knownBranches
+      .filter(b => b.name.trim().toLowerCase() === form.name.trim().toLowerCase())
+      .map(b => b.branch_code)
+      .filter(Boolean)
+  )) as string[];
 
   function set(field: keyof typeof EMPTY_BRANCH, value: unknown) {
     setForm(prev => ({ ...prev, [field]: value }));
@@ -431,11 +489,28 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
               <div style={{ gridColumn: 'span 2' }}>
                 <label>Company Name</label>
-                <input className="input" value={form.name} onChange={e => set('name', e.target.value)} />
+                <input
+                  className="input"
+                  list="company-name-options"
+                  value={form.name}
+                  onChange={e => set('name', e.target.value)}
+                  placeholder="Start typing to see existing companies…"
+                />
+                <datalist id="company-name-options">
+                  {companyNameOptions.map(n => <option key={n} value={n} />)}
+                </datalist>
               </div>
               <div>
                 <label>Branch Code</label>
-                <input className="input" value={form.branch_code} onChange={e => set('branch_code', e.target.value)} />
+                <input
+                  className="input"
+                  list="branch-code-options"
+                  value={form.branch_code}
+                  onChange={e => set('branch_code', e.target.value)}
+                />
+                <datalist id="branch-code-options">
+                  {branchCodeOptions.map(c => <option key={c} value={c} />)}
+                </datalist>
               </div>
               <div>
                 <label>Contact Status</label>
@@ -480,7 +555,17 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
           )}
 
           {tab === 'address' && (
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
+            <div>
+              {addressAutoFilled && (
+                <div style={{
+                  marginBottom: '1rem', padding: '0.6rem 0.85rem',
+                  background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.35)',
+                  borderRadius: '8px', fontSize: '0.8rem', color: 'var(--success, #10b981)',
+                }}>
+                  ✓ Auto-filled from an existing branch with this company name &amp; branch code. Edit any field if it&apos;s changed.
+                </div>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
               <div>
                 <label>Address Type</label>
                 <select className="input" value={form.address_type} onChange={e => set('address_type', e.target.value)}>
@@ -497,6 +582,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
               <div><label>Taluka</label><input className="input" value={form.taluka} onChange={e => set('taluka', e.target.value)} /></div>
               <div><label>District</label><input className="input" value={form.district} onChange={e => set('district', e.target.value)} /></div>
               <div><label>State</label><input className="input" value={form.state} onChange={e => set('state', e.target.value)} /></div>
+              </div>
             </div>
           )}
 
@@ -548,10 +634,8 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
                     <div><label>Email</label><input className="input" value={p.email || ''} onChange={e => setPerson(p.id, 'email', e.target.value)} /></div>
-                    <div><label>GST No.</label><input className="input" value={p.gst_no || ''} onChange={e => setPerson(p.id, 'gst_no', e.target.value)} /></div>
-                    <div><label>PAN No.</label><input className="input" value={p.pan_no || ''} onChange={e => setPerson(p.id, 'pan_no', e.target.value)} /></div>
                   </div>
 
                   <label style={{ marginBottom: '0.3rem', display: 'block' }}>Mobile numbers</label>
