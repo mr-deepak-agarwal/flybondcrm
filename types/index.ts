@@ -30,7 +30,17 @@ export interface Branch {
   about?: string;
   default_calling?: string; // placeholder field — exact meaning TBC with client
 
-  // Address
+  // Legal / company details (branch-level — distinct from a person's own
+  // gst_no/pan_no/aadhar_no on Contact)
+  legal_gst_no?: string;
+  legal_pan_no?: string;
+  legal_aadhar_no?: string;
+  company_reg_no?: string;
+  company_legal_name?: string;
+
+  // Legacy single-address columns — superseded by the `branch_addresses`
+  // table below (multiple addresses per branch). Left in place so old
+  // data isn't lost; no longer edited directly in the UI.
   address_type?: string; // Billing | Mailing | Other
   shop_no?: string;
   building_name?: string;
@@ -48,6 +58,32 @@ export interface Branch {
 
   // Populated client-side via a join, not a real column.
   contacts?: Contact[];
+  addresses?: BranchAddress[];
+}
+
+// ─── Multiple addresses per branch ──────────────────────────────
+// Note: no separate "Locality/Area" field — Town is kept as the one
+// place/locality field per the client's request to simplify this.
+export interface BranchAddress {
+  id: string;
+  branch_id: string;
+  address_type?: string; // Billing | Mailing | Other
+  is_default?: boolean;
+  shop_no?: string;
+  building_name?: string;
+  lane_street?: string;
+  landmark?: string;
+  town?: string;
+  pin?: string;
+  taluka?: string;
+  district?: string;
+  state?: string;
+  position?: number;
+  created_at: string;
+}
+
+export function defaultAddress(branch: Pick<Branch, 'addresses'>): BranchAddress | undefined {
+  return branch.addresses?.find(a => a.is_default) ?? branch.addresses?.[0];
 }
 
 // "Primary Contact" shown in the UI isn't its own field — it's whichever
@@ -89,6 +125,28 @@ export interface ContactPhone {
   number: string;
   position?: number;
   created_at: string;
+}
+
+// ─── Contact emails (unlimited, per person — mirrors ContactPhone) ──
+export interface ContactEmail {
+  id: string;
+  contact_id: string;
+  label: string;   // e.g. "Email-1", "Work"
+  email: string;
+  position?: number;
+  created_at: string;
+}
+
+// Formats a 10-digit Indian mobile number as "XXX-XXX-XXXX".
+// Anything that isn't a plain 10-digit number is returned unchanged
+// (so numbers with a country code, landlines, etc. aren't mangled).
+export function formatMobile(raw?: string): string {
+  if (!raw) return '';
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) {
+    return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+  }
+  return raw;
 }
 
 export interface Contact {
@@ -162,6 +220,8 @@ export interface Contact {
 
   // Populated client-side via a join, not a real column.
   phones?: ContactPhone[];
+  emails?: ContactEmail[];
+  activities?: Pick<ContactActivity, 'id' | 'reschedule_at'>[];
 }
 
 // Derived helper
@@ -171,11 +231,29 @@ export function contactDisplayName(c: Pick<Contact, 'title' | 'first_name' | 'mi
     .join(' ');
 }
 
+export const CALL_SIGNIFICANCE_OPTIONS = ['significant', 'insignificant'] as const;
+
 export interface ContactActivity {
   id: string;
   contact_id: string;
   note: string;
+  call_significance?: string; // significant | insignificant
+  reschedule_at?: string;     // ISO datetime — when this call should be followed up
   created_at: string;
+}
+
+// How overdue a branch's next follow-up call is, based on the nearest
+// reschedule_at across its primary contact's activities. Returns undefined
+// if there's no upcoming/overdue reschedule on file.
+export function callDelayDays(activities: Pick<ContactActivity, 'reschedule_at'>[]): number | undefined {
+  const upcoming = activities
+    .map(a => a.reschedule_at)
+    .filter((d): d is string => !!d)
+    .sort();
+  if (!upcoming.length) return undefined;
+  const nearest = new Date(upcoming[0]).getTime();
+  const days = Math.floor((Date.now() - nearest) / (1000 * 60 * 60 * 24));
+  return days > 0 ? days : 0;
 }
 
 export interface Project {

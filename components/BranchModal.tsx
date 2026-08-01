@@ -2,27 +2,34 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  X, User, MapPin, Users, MessageSquare, Megaphone, Trash2, Plus, Star,
+  X, User, MapPin, Users, MessageSquare, Megaphone, FileText, Trash2, Plus, Star,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import type {
-  Branch, Contact, ContactActivity, ContactPhone,
+  Branch, Contact, ContactActivity, ContactPhone, ContactEmail, BranchAddress,
 } from '@/types';
 import {
-  contactDisplayName,
+  contactDisplayName, formatMobile,
   CONTACT_TYPE_OPTIONS, CATEGORY_OPTIONS, SEGMENT_OPTIONS,
   BRANCH_STATUS_OPTIONS, DESIGNATION_OPTIONS, TITLE_OPTIONS, ADDRESS_TYPE_OPTIONS,
+  CALL_SIGNIFICANCE_OPTIONS,
 } from '@/types';
 
 // A person row being edited. `id` is a real uuid for existing people,
 // or a temporary client-side id (prefixed "new-") for people not yet saved.
-interface PersonDraft extends Omit<Contact, 'id' | 'created_at' | 'updated_at' | 'phones'> {
+interface PersonDraft extends Omit<Contact, 'id' | 'created_at' | 'updated_at' | 'phones' | 'emails'> {
   id: string;
   isNew: boolean;
   phones: ContactPhone[];
+  emails: ContactEmail[];
 }
 
-const EMPTY_BRANCH: Omit<Branch, 'id' | 'customer_id' | 'created_at' | 'updated_at' | 'contacts'> = {
+interface AddressDraft extends Omit<BranchAddress, 'id' | 'branch_id' | 'created_at'> {
+  id: string;
+  isNew: boolean;
+}
+
+const EMPTY_BRANCH: Omit<Branch, 'id' | 'customer_id' | 'created_at' | 'updated_at' | 'contacts' | 'addresses'> = {
   name: '',
   branch_code: '',
   contact_type: '',
@@ -32,18 +39,31 @@ const EMPTY_BRANCH: Omit<Branch, 'id' | 'customer_id' | 'created_at' | 'updated_
   assigned_to: '',
   about: '',
   default_calling: '',
-  address_type: 'Billing',
-  shop_no: '',
-  building_name: '',
-  lane_street: '',
-  landmark: '',
-  area: '',
-  town: '',
-  pin: '',
-  taluka: '',
-  district: '',
-  state: '',
+  legal_gst_no: '',
+  legal_pan_no: '',
+  legal_aadhar_no: '',
+  company_reg_no: '',
+  company_legal_name: '',
 };
+
+function blankAddress(isDefault: boolean): AddressDraft {
+  return {
+    id: `new-${crypto.randomUUID()}`,
+    isNew: true,
+    address_type: 'Billing',
+    is_default: isDefault,
+    shop_no: '',
+    building_name: '',
+    lane_street: '',
+    landmark: '',
+    town: '',
+    pin: '',
+    taluka: '',
+    district: '',
+    state: '',
+    position: 0,
+  };
+}
 
 function blankPerson(): PersonDraft {
   return {
@@ -93,12 +113,14 @@ function blankPerson(): PersonDraft {
     notes: '',
     pending_status: '',
     phones: [],
+    emails: [],
   };
 }
 
 const TABS = [
   { key: 'identity',  label: 'Identity',      icon: User },
   { key: 'address',   label: 'Address',       icon: MapPin },
+  { key: 'legal',     label: 'Legal',         icon: FileText },
   { key: 'people',    label: 'More Contacts', icon: Users },
   { key: 'activity',  label: 'Activity',      icon: MessageSquare },
   { key: 'campaigns', label: 'Campaigns',     icon: Megaphone },
@@ -132,6 +154,11 @@ const CONTACT_COLUMNS: (keyof PersonDraft)[] = [
   'next_call_date', 'call_significance', 'notes', 'pending_status',
 ];
 
+const ADDRESS_COLUMNS: (keyof AddressDraft)[] = [
+  'address_type', 'is_default', 'shop_no', 'building_name', 'lane_street',
+  'landmark', 'town', 'pin', 'taluka', 'district', 'state', 'position',
+];
+
 function toContactPayload(p: PersonDraft, companyId: string): Record<string, unknown> {
   const payload: Record<string, unknown> = { company_id: companyId };
   for (const key of CONTACT_COLUMNS) {
@@ -143,12 +170,39 @@ function toContactPayload(p: PersonDraft, companyId: string): Record<string, unk
   return payload;
 }
 
+function toAddressPayload(a: AddressDraft, branchId: string): Record<string, unknown> {
+  const payload: Record<string, unknown> = { branch_id: branchId };
+  for (const key of ADDRESS_COLUMNS) {
+    const value = a[key];
+    payload[key] = value === '' ? null : value;
+  }
+  return payload;
+}
+
+// Best-effort pincode lookup (India Post API) — fills Town / District /
+// State when they're empty. Fails silently; this is a convenience, not
+// something the user should be blocked on if there's no network.
+async function lookupPincode(pin: string): Promise<{ town?: string; district?: string; state?: string } | null> {
+  try {
+    const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+    const data = await res.json();
+    const office = data?.[0]?.PostOffice?.[0];
+    if (!office) return null;
+    return { town: office.Name, district: office.District, state: office.State };
+  } catch {
+    return null;
+  }
+}
+
 interface Campaign { id: string; name: string; description?: string; }
 
 interface Props {
   branch: Branch | null;
   onClose: () => void;
-  onSaved: () => void;
+  // Called after every successful save with the freshly-saved branch id,
+  // so the parent can refresh its list without closing this dialog —
+  // the dialog only closes when the user explicitly cancels/closes it.
+  onSaved: (branchId: string) => void;
 }
 
 export default function BranchModal({ branch, onClose, onSaved }: Props) {
@@ -156,13 +210,18 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   const [form, setForm]     = useState<typeof EMPTY_BRANCH>(EMPTY_BRANCH);
   const [people, setPeople] = useState<PersonDraft[]>([]);
   const [removedPeopleIds, setRemovedPeopleIds] = useState<string[]>([]);
+  const [addresses, setAddresses] = useState<AddressDraft[]>([]);
+  const [removedAddressIds, setRemovedAddressIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
 
   // Activity log — attached to the primary person, since activities/campaigns
   // are still per-contact in the schema (not per-branch). Worth revisiting
   // once it's clear whether activity history should be at the branch level.
   const [activities, setActivities] = useState<ContactActivity[]>([]);
   const [actNote, setActNote]       = useState('');
+  const [actSignificance, setActSignificance] = useState('significant');
+  const [actReschedule, setActReschedule]     = useState('');
   const [actSaving, setActSaving]   = useState(false);
   const actEndRef = useRef<HTMLDivElement>(null);
 
@@ -172,10 +231,9 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
 
   // Known companies (for Company Name autocomplete + auto-filling the
   // Address tab when the same company + branch has been entered before).
-  const [knownBranches, setKnownBranches] = useState<Pick<Branch,
-    'name' | 'branch_code' | 'address_type' | 'shop_no' | 'building_name' |
-    'lane_street' | 'landmark' | 'area' | 'town' | 'pin' | 'taluka' | 'district' | 'state'
-  >[]>([]);
+  const [knownBranches, setKnownBranches] = useState<{
+    name: string; branch_code: string | null; addresses: BranchAddress[];
+  }[]>([]);
   const [addressAutoFilled, setAddressAutoFilled] = useState(false);
 
   const supabase = createClient();
@@ -194,14 +252,19 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
         ...c,
         isNew: false,
         phones: c.phones || [],
+        emails: c.emails || [],
       })) as PersonDraft[]);
+      const existingAddrs = (branch.addresses || []).map(a => ({ ...a, isNew: false })) as AddressDraft[];
+      setAddresses(existingAddrs.length ? existingAddrs : [blankAddress(true)]);
     } else {
       setForm({ ...EMPTY_BRANCH });
       const first = blankPerson();
       first.is_primary = true;
       setPeople([first]);
+      setAddresses([blankAddress(true)]);
     }
     setRemovedPeopleIds([]);
+    setRemovedAddressIds([]);
     setTab('identity');
     setActivities([]);
     setLinkedCampaigns(new Set());
@@ -234,9 +297,9 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   useEffect(() => {
     supabase
       .from('branches')
-      .select('name, branch_code, address_type, shop_no, building_name, lane_street, landmark, area, town, pin, taluka, district, state')
+      .select('name, branch_code, addresses:branch_addresses(*)')
       .order('name')
-      .then(({ data }) => setKnownBranches(data || []));
+      .then(({ data }) => setKnownBranches((data || []) as typeof knownBranches));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the company name + branch code the user just typed matches an
@@ -254,21 +317,8 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
         );
 
     setAddressAutoFilled(!!match); // eslint-disable-line react-hooks/set-state-in-effect
-    if (match) {
-      setForm(prev => ({
-        ...prev,
-        address_type: match.address_type || prev.address_type,
-        shop_no: match.shop_no || '',
-        building_name: match.building_name || '',
-        lane_street: match.lane_street || '',
-        landmark: match.landmark || '',
-        area: match.area || '',
-        town: match.town || '',
-        pin: match.pin || '',
-        taluka: match.taluka || '',
-        district: match.district || '',
-        state: match.state || '',
-      }));
+    if (match && match.addresses.length) {
+      setAddresses(match.addresses.map(a => ({ ...a, id: `new-${crypto.randomUUID()}`, isNew: true })));
     }
   }, [form.name, form.branch_code, knownBranches, branch]);
 
@@ -300,6 +350,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
     const removing = people.find(p => p.id === id);
     if (!removing) return;
     if (people.length === 1) { alert('A branch needs at least one contact person.'); return; }
+    if (!confirm('Remove this contact person?')) return;
     if (!removing.isNew) setRemovedPeopleIds(prev => [...prev, id]);
     const rest = people.filter(p => p.id !== id);
     if (removing.is_primary && rest.length) rest[0].is_primary = true;
@@ -318,10 +369,71 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
       : p));
   }
 
+  // Reformats a mobile number into 3-3-4 groups once the user leaves the field.
+  function formatPhoneOnBlur(personId: string, phoneId: string, value: string) {
+    setPhone(personId, phoneId, 'number', formatMobile(value));
+  }
+
   function removePhone(personId: string, phoneId: string) {
+    if (!confirm('Remove this number?')) return;
     setPeople(prev => prev.map(p => p.id === personId
       ? { ...p, phones: p.phones.filter(ph => ph.id !== phoneId) }
       : p));
+  }
+
+  function addEmail(personId: string) {
+    setPeople(prev => prev.map(p => p.id === personId
+      ? { ...p, emails: [...p.emails, { id: `new-${crypto.randomUUID()}`, contact_id: personId, label: `Email-${p.emails.length + 1}`, email: '', created_at: '' }] }
+      : p));
+  }
+
+  function setEmail(personId: string, emailId: string, field: 'label' | 'email', value: string) {
+    setPeople(prev => prev.map(p => p.id === personId
+      ? { ...p, emails: p.emails.map(em => em.id === emailId ? { ...em, [field]: value } : em) }
+      : p));
+  }
+
+  function removeEmail(personId: string, emailId: string) {
+    if (!confirm('Remove this email?')) return;
+    setPeople(prev => prev.map(p => p.id === personId
+      ? { ...p, emails: p.emails.filter(em => em.id !== emailId) }
+      : p));
+  }
+
+  function addAddress() {
+    setAddresses(prev => [...prev, blankAddress(prev.length === 0)]);
+  }
+
+  function setAddress(id: string, field: keyof AddressDraft, value: unknown) {
+    setAddresses(prev => prev.map(a => a.id === id ? { ...a, [field]: value } : a));
+  }
+
+  function makeDefaultAddress(id: string) {
+    setAddresses(prev => prev.map(a => ({ ...a, is_default: a.id === id })));
+  }
+
+  function removeAddress(id: string) {
+    const removing = addresses.find(a => a.id === id);
+    if (!removing) return;
+    if (addresses.length === 1) { alert('A branch needs at least one address.'); return; }
+    if (!confirm('Remove this address?')) return;
+    if (!removing.isNew) setRemovedAddressIds(prev => [...prev, id]);
+    const rest = addresses.filter(a => a.id !== id);
+    if (removing.is_default && rest.length) rest[0].is_default = true;
+    setAddresses(rest);
+  }
+
+  async function onPinBlur(id: string, pin: string) {
+    const addr = addresses.find(a => a.id === id);
+    if (!addr || !/^\d{6}$/.test(pin)) return;
+    const result = await lookupPincode(pin);
+    if (!result) return;
+    setAddresses(prev => prev.map(a => a.id === id ? {
+      ...a,
+      town: a.town || result.town || a.town,
+      district: a.district || result.district || a.district,
+      state: a.state || result.state || a.state,
+    } : a));
   }
 
   async function save() {
@@ -359,9 +471,9 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
         await supabase.from('contacts').update({ is_primary: false }).eq('company_id', branchId);
       }
 
-      // 3. Upsert each person, then replace their phones.
+      // 3. Upsert each person, then replace their phones + emails.
       for (const p of people) {
-        const { isNew, phones, id } = p;
+        const { isNew, phones, emails, id } = p;
         const personPayload = toContactPayload(p, branchId);
 
         let personId = id;
@@ -383,9 +495,36 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
           const { error } = await supabase.from('contact_phones').insert(phoneRows);
           if (error) throw error;
         }
+
+        await supabase.from('contact_emails').delete().eq('contact_id', personId);
+        const emailRows = emails.filter(em => em.email.trim()).map((em, i) => ({
+          contact_id: personId, label: em.label || `Email-${i + 1}`, email: em.email, position: i,
+        }));
+        if (emailRows.length) {
+          const { error } = await supabase.from('contact_emails').insert(emailRows);
+          if (error) throw error;
+        }
       }
 
-      onSaved();
+      // 4. Delete removed addresses, then upsert the rest.
+      if (removedAddressIds.length) {
+        await supabase.from('branch_addresses').delete().in('id', removedAddressIds);
+      }
+      for (const [i, a] of addresses.entries()) {
+        const { isNew, id } = a;
+        const addressPayload = { ...toAddressPayload(a, branchId), position: i };
+        if (isNew) {
+          const { error } = await supabase.from('branch_addresses').insert(addressPayload);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('branch_addresses').update(addressPayload).eq('id', id);
+          if (error) throw error;
+        }
+      }
+
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 2000);
+      onSaved(branchId);
     } catch (err) {
       console.error('Save error:', err);
       alert(`Failed to save: ${supabaseErrorMessage(err)}`);
@@ -399,12 +538,23 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
     if (!text || !primaryId || primaryId.startsWith('new-')) return;
     setActSaving(true);
     const { data, error } = await supabase.from('contact_activities')
-      .insert({ contact_id: primaryId, note: text }).select().single();
-    if (!error && data) { setActivities(prev => [...prev, data as ContactActivity]); setActNote(''); }
+      .insert({
+        contact_id: primaryId,
+        note: text,
+        call_significance: actSignificance,
+        reschedule_at: actReschedule ? new Date(actReschedule).toISOString() : null,
+      }).select().single();
+    if (!error && data) {
+      setActivities(prev => [...prev, data as ContactActivity]);
+      setActNote('');
+      setActReschedule('');
+      setActSignificance('significant');
+    }
     setActSaving(false);
   }
 
   async function deleteActivity(id: string) {
+    if (!confirm('Delete this activity entry?')) return;
     await supabase.from('contact_activities').delete().eq('id', id);
     setActivities(prev => prev.filter(a => a.id !== id));
   }
@@ -426,7 +576,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   const displayPrimary = people.find(p => p.is_primary);
 
   return (
-    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+    <div className="modal-overlay">
       <div className="modal modal-wide" style={{ maxWidth: '860px' }}>
 
         {/* Header */}
@@ -439,6 +589,9 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                 Primary: {contactDisplayName(displayPrimary) || '—'}
               </span>
+            )}
+            {savedFlash && (
+              <span style={{ fontSize: '0.75rem', color: 'var(--success, #10b981)', fontWeight: 600 }}>✓ Saved</span>
             )}
           </div>
           <button className="btn-icon" onClick={onClose}><X size={15} /></button>
@@ -463,6 +616,11 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
             >
               <t.icon size={13} />
               {t.label}
+              {t.key === 'address' && addresses.length > 0 && (
+                <span style={{ background: 'var(--accent)', color: '#fff', borderRadius: '20px', fontSize: '0.65rem', padding: '0 5px', lineHeight: '16px', minWidth: '16px', textAlign: 'center' }}>
+                  {addresses.length}
+                </span>
+              )}
               {t.key === 'people' && (
                 <span style={{ background: 'var(--accent)', color: '#fff', borderRadius: '20px', fontSize: '0.65rem', padding: '0 5px', lineHeight: '16px', minWidth: '16px', textAlign: 'center' }}>
                   {people.length}
@@ -518,13 +676,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                   {BRANCH_STATUS_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
-              <div>
-                <label>Contact Type</label>
-                <select className="input" value={form.contact_type} onChange={e => set('contact_type', e.target.value)}>
-                  <option value="">—</option>
-                  {CONTACT_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
-              </div>
+              {/* Category (left) / Contact Type (right) */}
               <div>
                 <label>Category</label>
                 <select className="input" value={form.category} onChange={e => set('category', e.target.value)}>
@@ -533,19 +685,23 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                 </select>
               </div>
               <div>
-                <label>Segment</label>
-                <select className="input" value={form.segment} onChange={e => set('segment', e.target.value)}>
+                <label>Contact Type</label>
+                <select className="input" value={form.contact_type} onChange={e => set('contact_type', e.target.value)}>
                   <option value="">—</option>
-                  {SEGMENT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                  {CONTACT_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
                 </select>
               </div>
+              {/* Assigned to (left) / Segment (right, below Category) */}
               <div>
                 <label>Assigned to / Executive</label>
                 <input className="input" value={form.assigned_to} onChange={e => set('assigned_to', e.target.value)} placeholder="e.g. Suneel" />
               </div>
               <div>
-                <label title="Purpose still being confirmed with client">Default calling <span style={{ opacity: 0.5 }}>(placeholder)</span></label>
-                <input className="input" value={form.default_calling} onChange={e => set('default_calling', e.target.value)} />
+                <label>Segment</label>
+                <select className="input" value={form.segment} onChange={e => set('segment', e.target.value)}>
+                  <option value="">—</option>
+                  {SEGMENT_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                </select>
               </div>
               <div style={{ gridColumn: 'span 2' }}>
                 <label>About Company</label>
@@ -565,24 +721,76 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                   ✓ Auto-filled from an existing branch with this company name &amp; branch code. Edit any field if it&apos;s changed.
                 </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem' }}>
-              <div>
-                <label>Address Type</label>
-                <select className="input" value={form.address_type} onChange={e => set('address_type', e.target.value)}>
-                  {ADDRESS_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
-                </select>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)', margin: 0 }}>
+                  Add one row per address type (Billing, Mailing, Other…) and mark one as default.
+                </p>
+                <button className="btn-secondary" onClick={addAddress} style={{ fontSize: '0.78rem', display: 'flex', gap: '0.3rem', alignItems: 'center' }}>
+                  <Plus size={13} /> Add address
+                </button>
               </div>
-              <div><label>Shop No.</label><input className="input" value={form.shop_no} onChange={e => set('shop_no', e.target.value)} /></div>
-              <div><label>Building Name</label><input className="input" value={form.building_name} onChange={e => set('building_name', e.target.value)} /></div>
-              <div style={{ gridColumn: 'span 3' }}><label>Lane / Street</label><input className="input" value={form.lane_street} onChange={e => set('lane_street', e.target.value)} /></div>
-              <div style={{ gridColumn: 'span 3' }}><label>Landmark</label><input className="input" value={form.landmark} onChange={e => set('landmark', e.target.value)} /></div>
-              <div><label>Locality / Area</label><input className="input" value={form.area} onChange={e => set('area', e.target.value)} /></div>
-              <div><label>Place / Town</label><input className="input" value={form.town} onChange={e => set('town', e.target.value)} /></div>
-              <div><label>Pin Code</label><input className="input" value={form.pin} onChange={e => set('pin', e.target.value)} /></div>
-              <div><label>Taluka</label><input className="input" value={form.taluka} onChange={e => set('taluka', e.target.value)} /></div>
-              <div><label>District</label><input className="input" value={form.district} onChange={e => set('district', e.target.value)} /></div>
-              <div><label>State</label><input className="input" value={form.state} onChange={e => set('state', e.target.value)} /></div>
+
+              {addresses.map(a => (
+                <div key={a.id} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '1rem', marginBottom: '0.75rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.75rem' }}>
+                    <button
+                      onClick={() => makeDefaultAddress(a.id)}
+                      title="Set as default address"
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: a.is_default ? 'var(--warning, #f59e0b)' : 'var(--text-muted)' }}
+                    >
+                      <Star size={16} fill={a.is_default ? 'currentColor' : 'none'} />
+                    </button>
+                    <select
+                      className="input"
+                      style={{ width: '160px' }}
+                      value={a.address_type || 'Billing'}
+                      onChange={e => setAddress(a.id, 'address_type', e.target.value)}
+                    >
+                      {ADDRESS_TYPE_OPTIONS.map(o => <option key={o} value={o}>{o}</option>)}
+                    </select>
+                    <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                      {a.is_default ? 'Default address' : ''}
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <button className="btn-icon danger" onClick={() => removeAddress(a.id)}><Trash2 size={12} /></button>
+                  </div>
+
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem' }}>
+                    <div><label>Shop No.</label><input className="input" value={a.shop_no || ''} onChange={e => setAddress(a.id, 'shop_no', e.target.value)} /></div>
+                    <div><label>Building Name</label><input className="input" value={a.building_name || ''} onChange={e => setAddress(a.id, 'building_name', e.target.value)} /></div>
+                    <div style={{ gridColumn: 'span 3' }}><label>Lane / Street</label><input className="input" value={a.lane_street || ''} onChange={e => setAddress(a.id, 'lane_street', e.target.value)} /></div>
+                    <div style={{ gridColumn: 'span 3' }}><label>Landmark</label><input className="input" value={a.landmark || ''} onChange={e => setAddress(a.id, 'landmark', e.target.value)} /></div>
+                    <div><label>Town</label><input className="input" value={a.town || ''} onChange={e => setAddress(a.id, 'town', e.target.value)} /></div>
+                    <div>
+                      <label>Pin Code</label>
+                      <input
+                        className="input" value={a.pin || ''}
+                        onChange={e => setAddress(a.id, 'pin', e.target.value)}
+                        onBlur={e => onPinBlur(a.id, e.target.value.trim())}
+                        maxLength={6}
+                        placeholder="6-digit pin — auto-fills town/district/state"
+                      />
+                    </div>
+                    <div><label>Taluka</label><input className="input" value={a.taluka || ''} onChange={e => setAddress(a.id, 'taluka', e.target.value)} /></div>
+                    <div><label>District</label><input className="input" value={a.district || ''} onChange={e => setAddress(a.id, 'district', e.target.value)} /></div>
+                    <div><label>State</label><input className="input" value={a.state || ''} onChange={e => setAddress(a.id, 'state', e.target.value)} /></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === 'legal' && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+              <div style={{ gridColumn: 'span 2' }}>
+                <label>Registered / Legal Company Name</label>
+                <input className="input" value={form.company_legal_name} onChange={e => set('company_legal_name', e.target.value)} placeholder="If different from trade name above" />
               </div>
+              <div><label>GST No.</label><input className="input" value={form.legal_gst_no} onChange={e => set('legal_gst_no', e.target.value)} /></div>
+              <div><label>PAN No.</label><input className="input" value={form.legal_pan_no} onChange={e => set('legal_pan_no', e.target.value)} /></div>
+              <div><label>Aadhar No.</label><input className="input" value={form.legal_aadhar_no} onChange={e => set('legal_aadhar_no', e.target.value)} /></div>
+              <div><label>Company Registration No.</label><input className="input" value={form.company_reg_no} onChange={e => set('company_reg_no', e.target.value)} /></div>
             </div>
           )}
 
@@ -634,9 +842,25 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                     </div>
                   </div>
 
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '0.6rem', marginBottom: '0.6rem' }}>
-                    <div><label>Email</label><input className="input" value={p.email || ''} onChange={e => setPerson(p.id, 'email', e.target.value)} /></div>
-                  </div>
+                  <label style={{ marginBottom: '0.3rem', display: 'block' }}>Email addresses</label>
+                  {p.emails.map(em => (
+                    <div key={em.id} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.4rem' }}>
+                      <input
+                        className="input" style={{ width: '110px' }}
+                        value={em.label} onChange={e => setEmail(p.id, em.id, 'label', e.target.value)}
+                        placeholder="Label"
+                      />
+                      <input
+                        className="input" style={{ flex: 1 }}
+                        value={em.email} onChange={e => setEmail(p.id, em.id, 'email', e.target.value)}
+                        placeholder="name@example.com"
+                      />
+                      <button className="btn-icon danger" onClick={() => removeEmail(p.id, em.id)}><Trash2 size={12} /></button>
+                    </div>
+                  ))}
+                  <button className="btn-secondary" onClick={() => addEmail(p.id)} style={{ fontSize: '0.75rem', display: 'flex', gap: '0.3rem', alignItems: 'center', marginBottom: '0.75rem' }}>
+                    <Plus size={12} /> Add email
+                  </button>
 
                   <label style={{ marginBottom: '0.3rem', display: 'block' }}>Mobile numbers</label>
                   {p.phones.map(ph => (
@@ -649,7 +873,8 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                       <input
                         className="input" style={{ flex: 1 }}
                         value={ph.number} onChange={e => setPhone(p.id, ph.id, 'number', e.target.value)}
-                        placeholder="+91 ..."
+                        onBlur={e => formatPhoneOnBlur(p.id, ph.id, e.target.value)}
+                        placeholder="10-digit mobile — formatted as 000-000-0000"
                       />
                       <button className="btn-icon danger" onClick={() => removePhone(p.id, ph.id)}><Trash2 size={12} /></button>
                     </div>
@@ -664,21 +889,55 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
 
           {tab === 'activity' && (
             <div>
+              <div style={{ marginBottom: '1rem' }}>
+                <label title="Purpose still being confirmed with client">Default calling <span style={{ opacity: 0.5 }}>(placeholder)</span></label>
+                <input className="input" value={form.default_calling} onChange={e => set('default_calling', e.target.value)} />
+              </div>
+
               {!primaryId || primaryId.startsWith('new-') ? (
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Save this contact first to log activity.</p>
               ) : (
                 <>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginBottom: '1rem' }}>
                     {activities.map(a => (
-                      <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem', padding: '0.5rem 0.75rem', background: 'var(--surface-2)', borderRadius: '8px' }}>
-                        <span style={{ fontSize: '0.82rem' }}>{a.note}</span>
-                        <button className="btn-icon danger" onClick={() => deleteActivity(a.id)}><Trash2 size={11} /></button>
+                      <div key={a.id} style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem', padding: '0.5rem 0.75rem', background: 'var(--surface-2)', borderRadius: '8px' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '0.5rem' }}>
+                          <span style={{ fontSize: '0.82rem', whiteSpace: 'pre-wrap' }}>{a.note}</span>
+                          <button className="btn-icon danger" onClick={() => deleteActivity(a.id)} style={{ flexShrink: 0 }}><Trash2 size={11} /></button>
+                        </div>
+                        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+                          {a.call_significance && (
+                            <span className={`badge`} style={{
+                              fontSize: '0.65rem',
+                              color: a.call_significance === 'significant' ? 'var(--warning, #f59e0b)' : 'var(--text-muted)',
+                            }}>
+                              {a.call_significance === 'significant' ? '★ Significant' : 'Insignificant'}
+                            </span>
+                          )}
+                          {a.reschedule_at && (
+                            <span style={{ fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                              Reschedule: {new Date(a.reschedule_at).toLocaleString()}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     ))}
                     <div ref={actEndRef} />
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <input className="input" value={actNote} onChange={e => setActNote(e.target.value)} placeholder="Add a note…" style={{ flex: 1 }} />
+                  <textarea
+                    className="input" value={actNote} onChange={e => setActNote(e.target.value)}
+                    placeholder="Add a note about this call…" rows={3} style={{ marginBottom: '0.5rem', width: '100%' }}
+                  />
+                  <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                    <select className="input" style={{ width: '160px' }} value={actSignificance} onChange={e => setActSignificance(e.target.value)}>
+                      {CALL_SIGNIFICANCE_OPTIONS.map(o => <option key={o} value={o}>{o === 'significant' ? 'Significant' : 'Insignificant'}</option>)}
+                    </select>
+                    <input
+                      className="input" type="datetime-local" style={{ width: '220px' }}
+                      value={actReschedule} onChange={e => setActReschedule(e.target.value)}
+                      title="Reschedule call to…"
+                    />
+                    <div style={{ flex: 1 }} />
                     <button className="btn-primary" onClick={addActivity} disabled={actSaving}>Add</button>
                   </div>
                 </>
@@ -709,7 +968,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
 
         {/* Footer */}
         <div style={{ padding: '1rem 1.5rem', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: '0.6rem' }}>
-          <button className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button className="btn-secondary" onClick={onClose}>Close</button>
           <button className="btn-primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save'}</button>
         </div>
       </div>
