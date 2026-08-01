@@ -2,8 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import {
-  X, User, MapPin, Users, MessageSquare, Megaphone, FileText, Trash2, Plus, Star,
-  Instagram, Facebook, Linkedin, Globe, MessageCircle,
+  X, User, MapPin, Users, MessageSquare, Megaphone, FileText, Trash2, Plus, Star, Share,
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase';
 import type {
@@ -16,14 +15,6 @@ import {
   BRANCH_STATUS_OPTIONS, DESIGNATION_OPTIONS, TITLE_OPTIONS, ADDRESS_TYPE_OPTIONS,
   CALL_SIGNIFICANCE_OPTIONS, LEGAL_DOC_TYPE_OPTIONS, SOCIAL_PLATFORM_OPTIONS,
 } from '@/types';
-
-// Icons for platforms with a well-established lucide-react export name.
-// X/Threads/Other fall back to a plain text badge below rather than risk an
-// import name that's been renamed between lucide-react major versions.
-const SOCIAL_ICONS: Partial<Record<string, typeof Instagram>> = {
-  Instagram: Instagram, Facebook: Facebook, WhatsApp: MessageCircle,
-  LinkedIn: Linkedin, Google: Globe,
-};
 
 // A person row being edited. `id` is a real uuid for existing people,
 // or a temporary client-side id (prefixed "new-") for people not yet saved.
@@ -149,7 +140,7 @@ const TABS = [
   { key: 'identity',  label: 'Identity',      icon: User },
   { key: 'address',   label: 'Address',       icon: MapPin },
   { key: 'legal',     label: 'Legal',         icon: FileText },
-  { key: 'social',    label: 'Social',        icon: Globe },
+  { key: 'social',    label: 'Social',        icon: Share },
   { key: 'people',    label: 'More Contacts', icon: Users },
   { key: 'activity',  label: 'Activity',      icon: MessageSquare },
   { key: 'campaigns', label: 'Campaigns',     icon: Megaphone },
@@ -1009,13 +1000,8 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-dim)' }}>No social links added yet.</p>
               )}
 
-              {socials.map(s => {
-                const Icon = SOCIAL_ICONS[s.platform];
-                return (
+              {socials.map(s => (
                   <div key={s.id} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', alignItems: 'center' }}>
-                    <span style={{ width: '20px', flexShrink: 0, display: 'flex', justifyContent: 'center', color: 'var(--text-muted)' }}>
-                      {Icon ? <Icon size={16} /> : <span style={{ fontSize: '0.7rem', fontWeight: 700 }}>{s.platform === 'X' ? 'X' : '@'}</span>}
-                    </span>
                     <select
                       className="input" style={{ width: '150px', flexShrink: 0 }}
                       value={s.platform} onChange={e => setSocialField(s.id, 'platform', e.target.value)}
@@ -1036,8 +1022,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                     />
                     <button className="btn-icon danger" onClick={() => removeSocial(s.id)}><Trash2 size={12} /></button>
                   </div>
-                );
-              })}
+              ))}
             </div>
           )}
 
