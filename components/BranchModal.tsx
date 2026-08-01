@@ -179,18 +179,25 @@ function toAddressPayload(a: AddressDraft, branchId: string): Record<string, unk
   return payload;
 }
 
-// Best-effort pincode lookup (India Post API) — fills Town / District /
-// State when they're empty. Fails silently; this is a convenience, not
-// something the user should be blocked on if there's no network.
-async function lookupPincode(pin: string): Promise<{ town?: string; district?: string; state?: string } | null> {
+// Pincode lookup (India Post API) — fills Town / District / State when
+// they're empty. Returns a status so the caller can show the user what
+// happened (rather than failing silently, which just looked broken).
+type PincodeResult =
+  | { status: 'ok'; town?: string; district?: string; state?: string }
+  | { status: 'not_found' }
+  | { status: 'error' };
+
+async function lookupPincode(pin: string): Promise<PincodeResult> {
   try {
     const res = await fetch(`https://api.postalpincode.in/pincode/${pin}`);
+    if (!res.ok) return { status: 'error' };
     const data = await res.json();
-    const office = data?.[0]?.PostOffice?.[0];
-    if (!office) return null;
-    return { town: office.Name, district: office.District, state: office.State };
+    const entry = data?.[0];
+    if (entry?.Status !== 'Success' || !entry?.PostOffice?.length) return { status: 'not_found' };
+    const office = entry.PostOffice[0];
+    return { status: 'ok', town: office.Name, district: office.District, state: office.State };
   } catch {
-    return null;
+    return { status: 'error' };
   }
 }
 
@@ -211,6 +218,7 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
   const [people, setPeople] = useState<PersonDraft[]>([]);
   const [removedPeopleIds, setRemovedPeopleIds] = useState<string[]>([]);
   const [addresses, setAddresses] = useState<AddressDraft[]>([]);
+  const [pinLookup, setPinLookup] = useState<Record<string, 'loading' | 'ok' | 'not_found' | 'error'>>({});
   const [removedAddressIds, setRemovedAddressIds] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
@@ -425,15 +433,22 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
 
   async function onPinBlur(id: string, pin: string) {
     const addr = addresses.find(a => a.id === id);
-    if (!addr || !/^\d{6}$/.test(pin)) return;
+    if (!addr) return;
+    if (!/^\d{6}$/.test(pin)) {
+      setPinLookup(prev => { const next = { ...prev }; delete next[id]; return next; });
+      return;
+    }
+    setPinLookup(prev => ({ ...prev, [id]: 'loading' }));
     const result = await lookupPincode(pin);
-    if (!result) return;
-    setAddresses(prev => prev.map(a => a.id === id ? {
-      ...a,
-      town: a.town || result.town || a.town,
-      district: a.district || result.district || a.district,
-      state: a.state || result.state || a.state,
-    } : a));
+    setPinLookup(prev => ({ ...prev, [id]: result.status }));
+    if (result.status === 'ok') {
+      setAddresses(prev => prev.map(a => a.id === id ? {
+        ...a,
+        town: a.town || result.town || a.town,
+        district: a.district || result.district || a.district,
+        state: a.state || result.state || a.state,
+      } : a));
+    }
   }
 
   async function save() {
@@ -771,6 +786,18 @@ export default function BranchModal({ branch, onClose, onSaved }: Props) {
                         maxLength={6}
                         placeholder="6-digit pin — auto-fills town/district/state"
                       />
+                      {pinLookup[a.id] === 'loading' && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>Looking up pincode…</span>
+                      )}
+                      {pinLookup[a.id] === 'ok' && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--success, #10b981)' }}>✓ Filled from pincode lookup</span>
+                      )}
+                      {pinLookup[a.id] === 'not_found' && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--warning, #f59e0b)' }}>Pincode not recognised — enter town/district/state manually</span>
+                      )}
+                      {pinLookup[a.id] === 'error' && (
+                        <span style={{ fontSize: '0.7rem', color: 'var(--danger, #ef4444)' }}>Couldn&apos;t reach the pincode lookup service — enter manually</span>
+                      )}
                     </div>
                     <div><label>Taluka</label><input className="input" value={a.taluka || ''} onChange={e => setAddress(a.id, 'taluka', e.target.value)} /></div>
                     <div><label>District</label><input className="input" value={a.district || ''} onChange={e => setAddress(a.id, 'district', e.target.value)} /></div>

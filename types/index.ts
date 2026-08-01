@@ -99,10 +99,17 @@ export const CONTACT_TYPE_OPTIONS = [
 export const CATEGORY_OPTIONS = [
   'Civil Engineer', 'Hospital', 'Healthcare', 'Individual', 'Clinic',
   'Resort', 'Lodge', 'Restaurant', 'Bank', 'Financial Institute',
+  'Industry', 'General Store', 'Pharmacy', 'Advocate', 'Notary',
+  'Hardware', 'Electrical', 'Developer', 'Pre school', 'School',
+  'College', 'Coaching Center', 'Bakery', 'Printing press',
+  'Advertising Agency', 'Digital Printer', 'Stationery', 'Flex Printers',
+  'Travel Agency', 'Cab Rentals', 'Auto Garage',
 ] as const;
 
 export const SEGMENT_OPTIONS = [
   'Healthcare', 'Hospitality', 'Hotel', 'Financial Institute',
+  'Educational Institute', 'Food Industry', 'Insurace Ind', 'Legal',
+  'Civil Developer', 'Construction', 'Automobile Industry', 'Printing Industry',
 ] as const;
 
 export const BRANCH_STATUS_OPTIONS = [
