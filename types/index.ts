@@ -59,6 +59,8 @@ export interface Branch {
   // Populated client-side via a join, not a real column.
   contacts?: Contact[];
   addresses?: BranchAddress[];
+  legalDocs?: BranchLegalDoc[];
+  socials?: BranchSocial[];
 }
 
 // ─── Multiple addresses per branch ──────────────────────────────
@@ -85,6 +87,36 @@ export interface BranchAddress {
 export function defaultAddress(branch: Pick<Branch, 'addresses'>): BranchAddress | undefined {
   return branch.addresses?.find(a => a.is_default) ?? branch.addresses?.[0];
 }
+
+// ─── Legal documents (repeatable list per branch) ───────────────
+export interface BranchLegalDoc {
+  id: string;
+  branch_id: string;
+  doc_type: string; // PAN | Aadhar | Driving License | Passport | GST | Govt ID | Company ID | Other
+  label?: string;   // custom label, used when doc_type = 'Other'
+  value?: string;
+  position?: number;
+  created_at: string;
+}
+
+export const LEGAL_DOC_TYPE_OPTIONS = [
+  'PAN', 'Aadhar', 'Driving License', 'Passport', 'GST', 'Govt ID', 'Company ID', 'Other',
+] as const;
+
+// ─── Social links (repeatable list per branch) ──────────────────
+export interface BranchSocial {
+  id: string;
+  branch_id: string;
+  platform: string; // Instagram | Facebook | WhatsApp | LinkedIn | X | Threads | Google | Other
+  label?: string;    // custom label, used when platform = 'Other'
+  value?: string;    // handle, number, or URL
+  position?: number;
+  created_at: string;
+}
+
+export const SOCIAL_PLATFORM_OPTIONS = [
+  'Instagram', 'Facebook', 'WhatsApp', 'LinkedIn', 'X', 'Threads', 'Google', 'Other',
+] as const;
 
 // "Primary Contact" shown in the UI isn't its own field — it's whichever
 // linked Contact has is_primary = true. Convenience getter for that.

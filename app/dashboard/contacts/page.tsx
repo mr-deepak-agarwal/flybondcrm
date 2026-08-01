@@ -34,7 +34,7 @@ export default function ContactsPage() {
     // addresses in one round trip, rather than N+1 queries per row.
     const { data, error } = await supabase
       .from('branches')
-      .select('*, addresses:branch_addresses(*), contacts(*, phones:contact_phones(*), emails:contact_emails(*), activities:contact_activities(reschedule_at))')
+      .select('*, addresses:branch_addresses(*), legalDocs:branch_legal_docs(*), socials:branch_socials(*), contacts(*, phones:contact_phones(*), emails:contact_emails(*), activities:contact_activities(reschedule_at))')
       .order('created_at', { ascending: false });
     if (error) setToast({ msg: error.message, type: 'error' });
     setBranches(data || []);
